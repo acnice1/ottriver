@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Ottawa Sailing Dashboard</title>
+  <link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#005599">
+
+<!-- Optional: Apple icon support -->
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      background: #f0f0f0;
+    }
+
+    header {
+      background: #003366;
+      color: white;
+      text-align: center;
+      padding: 1em;
+    }
+
+    nav {
+      display: flex;
+      justify-content: center;
+      background: #005599;
+      flex-wrap: nowrap;
+      overflow-x: auto;
+    }
+
+    nav button {
+      background: none;
+      color: white;
+      border: none;
+      padding: 1em 1.2em;
+      cursor: pointer;
+      font-size: 1em;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    nav button:hover,
+    nav button.active {
+      background: #0077aa;
+    }
+
+    .tab-content {
+      display: none;
+      padding: 1em;
+      background: white;
+      max-width: 1000px;
+      margin: auto;
+      box-shadow: 0 0 6px rgba(0,0,0,0.1);
+    }
+
+    .tab-content.active {
+      display: block;
+    }
+
+    img, iframe {
+      display: block;
+      margin: 1em auto;
+      max-width: 100%;
+      border: none;
+    }
+
+    a {
+      color: #003366;
+      text-decoration: none;
+      font-weight: bold;
+    }
+    
+    a:hover {
+      text-decoration: underline;
+    }
+    
+    /* Only center standalone links, not list item links */
+    .tab-content > a {
+      display: block;
+      text-align: center;
+      margin: 1em auto;
+}
+
+
+    @media (max-width: 600px) {
+      header {
+        font-size: 1rem;
+      }
+
+      nav button {
+        font-size: 0.9em;
+        padding: 0.75em 1em;
+      }
+
+      .tab-content {
+        padding: 0.8em;
+      }
+
+      iframe {
+        height: auto;
+      }
+
+      ul {
+        padding-left: 1.2em;
+      }
+    }
+    .collapsible-container {
+      max-width: 700px;
+      margin: 2em auto;
+      background: #fff;
+      border-radius: 6px;
+      box-shadow: 0 0 8px rgba(0,0,0,0.1);
+      overflow: hidden;
+    }
+
+    .collapsible {
+      background-color: #005599;
+      color: white;
+      cursor: pointer;
+      padding: 1em;
+      width: 100%;
+      border: none;
+      text-align: left;
+      outline: none;
+      font-size: 1.1em;
+      font-weight: bold;
+    }
+    
+
+    .collapsible:hover,
+    .collapsible.active {
+      background-color: #0077aa;
+    }
+
+    .collapsible-content {
+      padding: 1em;
+      display: none;
+      background-color: white;
+    }
+
+    .collapsible-content ul,
+    .collapsible-content ol {
+      margin-top: 0.5em;
+      margin-bottom: 1em;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Ottawa River Sailing Dashboard</h1>
+</header>
+
+<nav>
+  <button class="active" onclick="showTab('forecast', this)">Forecast</button>
+  <button onclick="showTab('radar', this)">Radar</button>
+  <button onclick="showTab('map', this)">Marine Map</button>
+  <button onclick="showTab('info', this)">Info</button>
+  <button onclick="showTab('emergency', this)">Emergency</button>
+</nav>
+
+
+<!-- Forecast Tab -->
+<div id="forecast" class="tab-content active">
+  <script id="wg_fwdg_91822_100_1753474742417">
+    (function (window, document) {
+      var loader = function () {
+        var arg = ["s=91822", "m=100", "uid=wg_fwdg_91822_100_1753474742417", "wj=knots", "tj=c", "waj=m", "tij=cm", "odh=0", "doh=24", "fhours=240", "hrsm=2", "vt=forecasts", "lng=en", "idbs=1", "p=WINDSPD,GUST,SMER,TMPE,FLHGT,CDC,APCP1s,RATING"];
+        var script = document.createElement("script");
+        var tag = document.getElementsByTagName("script")[0];
+        script.src = "https://www.windguru.cz/js/widget.php?" + (arg.join("&"));
+        tag.parentNode.insertBefore(script, tag);
+      };
+      window.addEventListener ? window.addEventListener("load", loader, false) : window.attachEvent("onload", loader);
+    })(window, document);
+  </script>
+
+  <script id="wg_fwdg_91822_3_1753474784789">
+    (function (window, document) {
+      var loader = function () {
+        var arg = ["s=91822", "m=3", "uid=wg_fwdg_91822_3_1753474784789", "wj=knots", "tj=c", "waj=m", "tij=cm", "odh=0", "doh=24", "fhours=240", "hrsm=3", "vt=forecasts", "lng=en", "p=WINDSPD,GUST,MWINDSPD,SMER,TMPE,FLHGT,CDC,APCP1s,RATING"];
+        var script = document.createElement("script");
+        var tag = document.getElementsByTagName("script")[0];
+        script.src = "https://www.windguru.cz/js/widget.php?" + (arg.join("&"));
+        tag.parentNode.insertBefore(script, tag);
+      };
+      window.addEventListener ? window.addEventListener("load", loader, false) : window.attachEvent("onload", loader);
+    })(window, document);
+  </script>
+
+  <iframe src="https://widgets.sailflow.com/widgets/web/conditions?spot_id=896&units_wind=kts&units_temp=C&width=300&height=600&color=0A2946&name=Ottawa&activity=Sail&app=sailflow" width="300" height="600"></iframe>
+  <a href="https://weather.gc.ca/en/location/index.html?coords=45.403,-75.687" target="_blank">Environment Canada Forecast</a>
+  <iframe title="Environment Canada Weather" width="296" height="191" src="https://weather.gc.ca/wxlink/wxlink.html?coords=45.403%2C-75.687&lang=e"></iframe>
+  <a class="weatherwidget-io" href="https://forecast7.com/en/45d42n75d69/ottawa/" data-label_1="OTTAWA" data-label_2="WEATHER" data-theme="pure">OTTAWA WEATHER</a>
+</div>
+
+<!-- Radar Tab -->
+<div id="radar" class="tab-content">
+  <h2 style="text-align:center;">🌦️ Live Radar & Conditions</h2>
+  <iframe src="https://www.meteoblue.com/en/weather/maps/widget/ottawa_canada_6094817?windAnimation=1&gust=1&satellite=1&cloudsAndPrecipitation=1&temperature=1&sunshine=1&extremeForecastIndex=1&geoloc=fixed&tempunit=C&windunit=kn&lengthunit=metric&zoom=10&autowidth=auto" style="width: 100%; height: 720px;"></iframe>
+  <div style="text-align: center;"><a href="https://www.meteoblue.com/en/weather/maps/ottawa_canada_6094817" target="_blank">View full Meteoblue map</a></div>
+</div>
+
+<!-- Marine Map Tab -->
+<div id="map" class="tab-content">
+  <a href="desc1.jpg" target="_blank"><img src="desc1.jpg" alt="Ottawa River Marine Map" width="800"></a>
+</div>
+
+<!-- Info Tab -->
+
+
+<div id="info" class="tab-content">
+  <a href="pos.jpg" target="_blank"><img src="pos.jpg" alt="Position Reference" width="800"></a>
+  <div id="manual-water-widget" style="max-width: 500px; margin: 2em auto; padding: 1em; background: #fff; box-shadow: 0 0 10px rgba(0,0,0,0.1); text-align: center;">
+    <h2>💧 Ottawa River Water Level – Britannia</h2>
+    <p>Chart Datum: <strong>57.9 m MASL</strong></p>
+    <label for="levelInput">Enter Current Water Level (m):</label>
+    <input type="number" id="levelInput" step="0.01" placeholder="e.g. 58.25" style="padding: 0.5em; width: 150px; text-align: center;">
+    <button onclick="calculateOffset()">Calculate</button>
+    <div id="offsetResult" style="margin-top: 1em;"></div>
+    <p><a href="https://wateroffice.ec.gc.ca/report/real_time_e.html?stn=02KF005" target="_blank">Environment Canada – Britannia Station</a></p>
+  </div>
+  <script>
+    function calculateOffset() {
+      const datum = 57.9;
+      const input = document.getElementById("levelInput").value;
+      const result = document.getElementById("offsetResult");
+      if (!input) {
+        result.innerHTML = "<span style='color: red;'>Please enter a value.</span>";
+        return;
+      }
+      const level = parseFloat(input);
+      const offset = level - datum;
+      const offsetFeet = offset * 3.28084;
+      const direction = offset >= 0 ? "deeper" : "shallower";
+      const color = offset >= 0 ? "green" : "red";
+      result.innerHTML = `Current Level: <strong>${level.toFixed(2)} m MASL</strong><br>Offset from Datum: <strong style="color: ${color};">${offset.toFixed(2)} m</strong> (<strong>${Math.abs(offsetFeet).toFixed(1)} ft ${direction}</strong>)`;
+    }
+  </script>
+  <!-- end water widget   --> 
+  <div style="padding: 1em;">
+    <h2 style="text-align: center;">Rules of the Road</h2>
+      <a href="rotr.jpg" target="_blank"><img src="rotr.jpg" alt="Rules of the Road " ></a>
+      <ul>
+        <li><b>Rule 1:</b> When you are on the same tack as the other boat, the leeward boat has the right-of-way. (leeward meaning downwind)</li>
+        <li><b>Rule 2:</b> When you are on opposite tacks, the starboard tack boat has the right-of-way.</li>
+        <li><b>Rule 3:</b> If you are overtaking the other boat, or it is overtaking you, the boat ahead (the overtaken boat) has the right-of-way. When you are on the same tack as the other boat, the leeward boat has the right-of-way.</li>
+        <li><b>Note: </b>Starboard tack: when the wind is coming from the starboard side (and port side for port tack obv.).</li>
+      </ul>
+  </div>
+  
+  <!-- collapsible sections -->
+  
+  <!-- Anchoring Checklist -->
+  <div class="collapsible-container">
+    <button class="collapsible">⚓ Anchoring Checklist</button>
+    <div class="collapsible-content">
+      <h3>✅ Before Anchoring</h3>
+      <ul>
+        <li>Check wind & current direction</li>
+        <li>Choose a spot with room to swing</li>
+        <li>Confirm depth and bottom type</li>
+        <li>Calculate scope: 5:1 (calm), 7:1+ (windy)</li>
+        <li>Prepare anchor, rode, chain</li>
+        <li>Assign hand signals or radio contact</li>
+      </ul>
+      <h3>⚓ While Anchoring</h3>
+      <ul>
+        <li>Approach slowly, head into wind/current</li>
+        <li>Stop boat — let it drift back</li>
+        <li>Lower anchor (don’t throw)</li>
+        <li>Pay out rode while reversing gently</li>
+        <li>Set anchor: reverse until tension</li>
+        <li>Check for drag visually or via GPS</li>
+      </ul>
+      <h3>🔒 After Anchoring</h3>
+      <ul>
+        <li>Snub the line with cleat or snubber</li>
+        <li>Set anchor alarm if using GPS</li>
+        <li>Check reference points</li>
+        <li>Log GPS position</li>
+        <li>Stow remaining rode</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- Cast-Off Procedure -->
+  <div class="collapsible-container">
+    <button class="collapsible">🚤 Cast-Off Procedure (Backing Out of Slip)</button>
+    <div class="collapsible-content">
+      <h3>✅ Before Casting Off</h3>
+      <ul>
+        <li>Engine running in neutral</li>
+        <li>Check surroundings</li>
+        <li>Rudder centered</li>
+        <li>Disconnect shore power</li>
+        <li>Fenders secured</li>
+      </ul>
+      <h3>🪢 Line Handling (Suggested Order)</h3>
+      <ol>
+        <li><strong>Bow line</strong> — release first</li>
+        <li><strong>Spring line</strong> — release second</li>
+        <li><strong>Stern line</strong> — release last</li>
+      </ol>
+      <h3>🕹️ Backing Out</h3>
+      <ul>
+        <li>Engage reverse idle</li>
+        <li>Release bow and spring lines as you begin moving</li>
+        <li>Release stern line and steer away</li>
+        <li>Use short reverse bursts for control</li>
+        <li>Shift to forward gear once clear</li>
+      </ul>
+      <h3>🔁 Tips</h3>
+      <ul>
+        <li>Use stern spring line to pivot if needed</li>
+        <li>Account for wind pushing bow or stern</li>
+        <li>Use prop walk or rudder thrust creatively</li>
+      </ul>
+    </div>
+  </div>
+  <!-- end collapsible -->
+  
+  <div style="padding: 1em;">
+    <h2 style="text-align: center;">Sail Reference Info</h2>
+    <ul>
+      <li>VHF Channel 16 – Emergency / Hailing</li>
+      <li>Safe anchoring ratio: 5:1 (calm) to 7:1+ (windy)</li>
+      <li>Prevailing winds: WNW to NW</li>
+      <li>Marina: <a href="https://nsc.ca" target="_blank">Nepean Sailing Club</a></li>
+    </ul>
+  </div>
+</div>
+
+<!-- Emergency Tab -->
+<div id="emergency" class="tab-content">
+  <div style="padding: 1em;">
+    <h2 style="text-align: center;">🆘 Emergency Information</h2>
+
+    <h3>⛴️ How to Call for Help on the Water</h3>
+
+    <h4>Marine VHF Radio (Preferred)</h4>
+    <ol>
+      <li>Switch to <strong>Channel 16</strong></li>
+      <li>Clearly say: <strong>“Mayday, Mayday, Mayday”</strong></li>
+      <li>Follow with:
+        <ul>
+          <li>Your <strong>boat name</strong></li>
+          <li>Your <strong>position</strong> (GPS or landmark)</li>
+          <li><strong>Nature of emergency</strong></li>
+          <li><strong>Number of people</strong> on board</li>
+          <li>What <strong>assistance</strong> you need</li>
+          <li>Any visible signals (flares, flags)</li>
+        </ul>
+      </li>
+    </ol>
+
+    <p><em><strong>Example:</strong></em><br>
+      “Mayday, Mayday, Mayday. This is sailboat <em>Dragonfly</em>.<br>
+      We are taking on water near Crystal Bay. Position approximately 45.41° N, 75.76° W.<br>
+      Three people on board. Request immediate assistance. We are launching red flares.”
+    </p>
+
+    <h4>📱 Cell Phone Backup</h4>
+    <ul>
+      <li>Dial <strong>911</strong> and state you are in a <strong>marine emergency</strong></li>
+      <li>Ask dispatch to contact <strong>JRCC Trenton</strong></li>
+      <li>Give your location, boat details, and emergency info</li>
+    </ul>
+
+    <h4>🚨 Emergency Numbers</h4>
+    <ul>
+      <li>📞 <strong>911</strong> (from cell, near shore)</li>
+      <li>📞 <strong>JRCC Trenton (24/7):</strong><br>
+        Toll-free: <strong>1-800-267-7270</strong><br>
+        Alternate: <strong>1-613-965-3870</strong>
+      </li>
+    </ul>
+
+    <h4>🧨 Emergency Signaling Options</h4>
+    <ul>
+      <li>Red flares (day/night)</li>
+      <li>Orange smoke (day)</li>
+      <li>Mirror or flashlight signals</li>
+      <li>Continuous horn blast</li>
+      </ul>
+    </div>
+    
+    <div style="padding: 1em;">
+    <h2>Other Links</h2>
+    <ul>
+      <li><a href="https://nsc.ca/an/boating/know-how/nsc-marine-emergency-procedures/" target="_blank">NSC Marine Emergency Procedures</a></li>
+    </ul>
+    </div>
+</div>
+
+<script>
+  function showTab(tabId, btn) {
+    const tabs = document.querySelectorAll('.tab-content');
+    const buttons = document.querySelectorAll('nav button');
+    tabs.forEach(tab => tab.classList.remove('active'));
+    buttons.forEach(button => button.classList.remove('active'));
+    document.getElementById(tabId).classList.add('active');
+    btn.classList.add('active');
+  }
+
+  const collapsibles = document.querySelectorAll(".collapsible");
+  collapsibles.forEach(btn => {
+    btn.addEventListener("click", function () {
+      this.classList.toggle("active");
+      const content = this.nextElementSibling;
+      content.style.display = content.style.display === "block" ? "none" : "block";
+    });
+  });
+</script>
+
+<script>
+  !(function(d,s,id){
+    var js,fjs=d.getElementsByTagName(s)[0];
+    if(!d.getElementById(id)){
+      js=d.createElement(s);js.id=id;
+      js.src='https://weatherwidget.io/js/widget.min.js';
+      fjs.parentNode.insertBefore(js,fjs);
+    }
+  })(document,'script','weatherwidget-io-js');
+</script>
+
+<script>
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/service-worker.js')
+      .then(reg => console.log('Service worker registered:', reg.scope))
+      .catch(err => console.error('Service worker error:', err));
+  }
+</script>
+
+</body>
+</html>
