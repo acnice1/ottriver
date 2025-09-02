@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<TileMap version="1.0.0" tilemapservice="http://tms.osgeo.org/1.0.0">
+  <Title>1550B01</Title>
+  <Abstract></Abstract>
+  <SRS>EPSG:3857</SRS>
+
+  <!-- Bounds from your gdalinfo (Web Mercator meters) -->
+  <BoundingBox
+    minx="-8482821.460"
+    miny="5690563.754"
+    maxx="-8452545.842"
+    maxy="5709420.766" />
+
+  <!-- Standard global-mercator origin -->
+  <Origin x="-20037508.34" y="-20037508.34" />
+
+  <!-- Set to image/jpeg + jpg if your tiles are JPEG -->
+  <TileFormat width="256" height="256" mime-type="image/png" extension="png"/>
+
+  <TileSets profile="global-mercator">
+    <!-- units-per-pixel for EPSG:3857 at 256px, z=9..16 -->
+    <TileSet href="" order="9"  units-per-pixel="305.748113140705"/>
+    <TileSet href="" order="10" units-per-pixel="152.8740565703525"/>
+    <TileSet href="" order="11" units-per-pixel="76.43702828517625"/>
+    <TileSet href="" order="12" units-per-pixel="38.21851414258813"/>
+    <TileSet href="" order="13" units-per-pixel="19.109257071294063"/>
+    <TileSet href="" order="14" units-per-pixel="9.554628535647032"/>
+    <TileSet href="" order="15" units-per-pixel="4.777314267823516"/>
+    <TileSet href="" order="16" units-per-pixel="2.388657133911758"/>
+  </TileSets>
+</TileMap>
