@@ -1,9 +1,9 @@
 /* =========================================================
-   Ottawa Sailing Dashboard — app.js (regenerated)
+   Ottawa Sailing Dashboard — app.js (regenerated, snappier GPS)
    ========================================================= */
 "use strict";
 
-/* ========================================================= 
+/* =========================================================
    Utilities & shared helpers
    ========================================================= */
 const $ = (sel) => document.querySelector(sel);
@@ -12,13 +12,42 @@ const fmt = (n, d = 1) => (Number.isFinite(n) ? n.toFixed(d) : "—");
 const mpsToKts = (mps) => (mps ?? 0) * 1.94384;
 const mToNm = (m) => m / 1852;
 
+/* =========================================================
+   Tuning parameters — all tweakables up front
+   ========================================================= */
+// Smoothing (snappier, trusts new data more)
+const POS_EMA_ALPHA = 0.75; // 0.70–0.85 recommended
+const SPD_EMA_ALPHA = 0.7; // 0.60–0.80 recommended
+const HEADING_SMOOTH_ALPHA = 0.5;
+
+// Speed / movement gating
+const MOVING_ENTER_KTS = 1.0;
+const MOVING_EXIT_KTS = 0.4;
+const SPEED_MIN_MOVE_M = 2; // ↓ from 5 (lets slow speeds register)
+const SPEED_ACC_FACTOR = 0.2; // ↓ from 0.6 (less harsh accuracy gate)
+
+// Trail cadence (more frequent, based on RAW fixes)
+const TRAIL_MAX_POINTS = 2000;
+const TRAIL_MIN_DIST_M = 2; // ↓ from 5
+const TRAIL_MIN_SEC = 0.75; // 0.5–1 s recommended
+
+// Staleness / fallbacks
+const MAX_STALE_MS = 4000; // watchdog pull-fresh threshold
+const GEO_LO_MAX_AGE_MS = 30000; // ↓ from 600000 (≤30s for low-accuracy retry)
+
+// LocalStorage keys
+const LS_POINTS = "sailTrailPoints_v1";
+const LS_DIST = "sailTrailDistM_v1";
+const LS_MARKERS = "sailMarkers_v1";
+
+/* ===== EMA helpers (explicit position & speed EMAs) ===== */
+const makeEma = (alpha) => (current, prev) =>
+  prev == null ? current : alpha * current + (1 - alpha) * prev;
+const posEma = makeEma(POS_EMA_ALPHA);
+const spdEma = makeEma(SPD_EMA_ALPHA);
+
 /* ===== Speed smoothing & stationary detection ===== */
-const SPEED_ALPHA = 0.25; // 0..1, lower = smoother
-const MOVING_ENTER_KTS = 1.0; // must exceed this to consider "moving"
-const MOVING_EXIT_KTS = 0.4; // must drop below this to consider "stopped"
-const SPEED_MIN_MOVE_M = 5; // base displacement gate (meters)
-const SPEED_ACC_FACTOR = 0.6; // raise gate by a fraction of GPS accuracy
-let speedEma = null;
+let speedEmaVal = null;
 let moving = false;
 
 /* =========================================================
@@ -217,7 +246,7 @@ const GEO = (() => {
     };
     const lo = {
       enableHighAccuracy: false,
-      maximumAge: 600000,
+      maximumAge: GEO_LO_MAX_AGE_MS, // ↓ from 10 minutes
       timeout: 30000,
     };
 
@@ -321,25 +350,16 @@ let chartsLoaded = false;
 let emaLat = null,
   emaLon = null,
   emaHead = null,
-  lastFix = null;
-const alpha = 0.25,
-  ema = (c, p) => (p == null ? c : alpha * c + (1 - alpha) * p);
+  lastFix = null; // { latitude, longitude, t }
 let trail = [],
   trailLine = null,
   totalDistM = 0;
-const TRAIL_MAX_POINTS = 2000,
-  TRAIL_MIN_DIST_M = 5,
-  TRAIL_MIN_SEC = 2;
-const LS_POINTS = "sailTrailPoints_v1",
-  LS_DIST = "sailTrailDistM_v1";
 
 let courseUp = false;
 let follow = true;
 let addMarkerActive = false;
 
 let markersLayer = null;
-const LS_MARKERS = "sailMarkers_v1";
-
 const overlayLayers = {};
 
 // --- Heading fusion & resume helpers ---
@@ -347,12 +367,6 @@ let compassHeading = null; // from device orientation (0..360)
 let gpsHeading = null; // from geolocation heading when moving
 let prevPointForCog = null; // previous GPS fix for computed COG
 let compassListening = false;
-const HEADING_SMOOTH_ALPHA = 0.25;
-const MAX_STALE_MS = 4000;
-
-// Prevent duplicate GEO.on wiring for the map
-let mapGpsBound = false;
-let mapUnsub = null;
 
 // Shortest-path angular smoothing (wrap-aware)
 function smoothAngle(prev, next, a = HEADING_SMOOTH_ALPHA) {
@@ -813,6 +827,7 @@ function startGpsForMap() {
   // Enable device compass (iOS permission happens here via user gesture)
   enableCompass();
 
+  // Bind GEO -> map once
   if (!mapGpsBound) {
     mapUnsub = GEO.on((type, payload) => {
       if (type === "position") onPos(payload);
@@ -831,6 +846,10 @@ function startGpsForMap() {
   GEO.start(true);
 }
 
+/* Prevent duplicate GEO.on wiring for the map */
+let mapGpsBound = false;
+let mapUnsub = null;
+
 function onPos(p) {
   const { latitude, longitude, heading, speed, accuracy } = p.coords;
   const now = p.timestamp;
@@ -840,7 +859,7 @@ function onPos(p) {
   // Preferred: device-reported speed (m/s)
   let instKts = Number.isFinite(speed) && speed >= 0 ? mpsToKts(speed) : null;
 
-  // Fallback: compute from displacement, gated by accuracy
+  // Fallback: compute from *raw* displacement, gently gated by accuracy
   if (!Number.isFinite(instKts)) {
     const dt = lastFix ? Math.max(0.5, (now - lastFix.t) / 1000) : null;
     const d =
@@ -859,17 +878,14 @@ function onPos(p) {
     }
   }
 
-  // Smooth (EMA)
-  speedEma =
-    speedEma == null
-      ? instKts
-      : SPEED_ALPHA * instKts + (1 - SPEED_ALPHA) * speedEma;
+  // Smooth speed (EMA)
+  speedEmaVal = spdEma(instKts, speedEmaVal);
 
   // Hysteresis: moving vs stopped
-  if (!moving && speedEma >= MOVING_ENTER_KTS) moving = true;
-  else if (moving && speedEma <= MOVING_EXIT_KTS) moving = false;
+  if (!moving && speedEmaVal >= MOVING_ENTER_KTS) moving = true;
+  else if (moving && speedEmaVal <= MOVING_EXIT_KTS) moving = false;
 
-  const kts = moving ? Math.max(0, speedEma) : 0;
+  const kts = moving ? Math.max(0, speedEmaVal) : 0;
 
   // ---------- HEADING ----------
   if (Number.isFinite(heading) && (speed || 0) > 0.5) {
@@ -879,8 +895,8 @@ function onPos(p) {
   applyHeadingToUi(chosen);
 
   // ---------- POSITION smoothing & boat marker ----------
-  emaLat = ema(latitude, emaLat);
-  emaLon = ema(longitude, emaLon);
+  emaLat = posEma(latitude, emaLat);
+  emaLon = posEma(longitude, emaLon);
 
   if (mmMap && !mmBoat) {
     const boatIcon = L.divIcon({
@@ -903,39 +919,33 @@ function onPos(p) {
     mmBoat.setLatLng([emaLat, emaLon]);
   }
 
-  // ---------- Trail handling (safe if map not init) ----------
-  const lastPt = trail.length ? trail[trail.length - 1] : null;
-  const tryAddPt = () => {
-    if (lastPt && mmMap) {
-      const segM = mmMap.distance([emaLat, emaLon], [lastPt[0], lastPt[1]]);
-      const segGate = Math.max(SPEED_MIN_MOVE_M, acc * SPEED_ACC_FACTOR);
-      if (moving || segM >= segGate) {
-        totalDistM += segM;
-      }
+  // ---------- Trail handling (RAW distance + more frequent) ----------
+  const lastPt = trail.length ? trail[trail.length - 1] : null; // [rawLat, rawLon, t]
+  const dtSinceLastPt = lastPt ? (now - lastPt[2]) / 1000 : Infinity;
+  let dRaw = 0;
+  if (lastPt && mmMap) {
+    dRaw = mmMap.distance([latitude, longitude], [lastPt[0], lastPt[1]]);
+  }
+
+  const shouldAdd =
+    !lastPt || (dRaw >= TRAIL_MIN_DIST_M && dtSinceLastPt >= TRAIL_MIN_SEC);
+
+  if (shouldAdd) {
+    if (lastPt && Number.isFinite(dRaw)) {
+      totalDistM += dRaw; // accumulate true ground distance between raw points
     }
-    trail.push([emaLat, emaLon, now]);
+    // Store RAW coords for trail to avoid lagged-looking track
+    trail.push([latitude, longitude, now]);
     if (trail.length > TRAIL_MAX_POINTS)
       trail.splice(0, trail.length - TRAIL_MAX_POINTS);
     if (trailLine) trailLine.setLatLngs(trail.map((p) => [p[0], p[1]]));
     saveTrail();
-  };
-
-  if (!lastPt) {
-    tryAddPt();
-  } else {
-    const d =
-      mmMap && lastPt
-        ? mmMap.distance([emaLat, emaLon], [lastPt[0], lastPt[1]])
-        : 0;
-    const dt = lastFix ? (now - lastFix.t) / 1000 : Infinity;
-    if (d >= TRAIL_MIN_DIST_M && dt >= TRAIL_MIN_SEC) tryAddPt();
   }
 
-  // ---------- Follow pan ----------
+  // ---------- Follow pan (unconditional when ON) ----------
   if (follow && mmMap && emaLat != null && emaLon != null) {
-    if (!mmMap.getBounds().pad(-0.3).contains([emaLat, emaLon])) {
-      mmMap.panTo([emaLat, emaLon], { animate: true });
-    }
+    // Replaces previous "pad(-0.3)" check — always keep centered, no animation
+    mmMap.setView([emaLat, emaLon], mmMap.getZoom(), { animate: false });
   }
 
   updateStats({ kts });
