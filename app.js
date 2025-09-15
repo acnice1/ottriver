@@ -1,5 +1,5 @@
 /* =========================================================
-   Ottawa Sailing Dashboard — app.js (regenerated, snappier GPS)
+   Ottawa Sailing Dashboard — app.js (MapLibre GL patch)
    ========================================================= */
 "use strict";
 
@@ -12,32 +12,46 @@ const fmt = (n, d = 1) => (Number.isFinite(n) ? n.toFixed(d) : "—");
 const mpsToKts = (mps) => (mps ?? 0) * 1.94384;
 const mToNm = (m) => m / 1852;
 
+// Haversine distance (replaces Leaflet's mmMap.distance)
+function geoDistMeters(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const toRad = (x) => (x * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) *
+      Math.cos(toRad(lat2)) *
+      Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
 /* =========================================================
    Tuning parameters — all tweakables up front
    ========================================================= */
 // Smoothing (snappier, trusts new data more)
 const POS_EMA_ALPHA = 0.75; // 0.70–0.85 recommended
-const SPD_EMA_ALPHA = 0.7; // 0.60–0.80 recommended
+const SPD_EMA_ALPHA = 0.7;  // 0.60–0.80 recommended
 const HEADING_SMOOTH_ALPHA = 0.5;
 
 // Speed / movement gating
 const MOVING_ENTER_KTS = 1.0;
 const MOVING_EXIT_KTS = 0.4;
-const SPEED_MIN_MOVE_M = 2; // ↓ from 5 (lets slow speeds register)
+const SPEED_MIN_MOVE_M = 2;   // ↓ from 5 (lets slow speeds register)
 const SPEED_ACC_FACTOR = 0.2; // ↓ from 0.6 (less harsh accuracy gate)
 
 // Trail cadence (more frequent, based on RAW fixes)
 const TRAIL_MAX_POINTS = 2000;
-const TRAIL_MIN_DIST_M = 2; // ↓ from 5
-const TRAIL_MIN_SEC = 0.75; // 0.5–1 s recommended
+const TRAIL_MIN_DIST_M = 2;   // ↓ from 5
+const TRAIL_MIN_SEC    = 0.75; // 0.5–1 s recommended
 
 // Staleness / fallbacks
-const MAX_STALE_MS = 4000; // watchdog pull-fresh threshold
+const MAX_STALE_MS      = 4000; // watchdog pull-fresh threshold
 const GEO_LO_MAX_AGE_MS = 30000; // ↓ from 600000 (≤30s for low-accuracy retry)
 
 // LocalStorage keys
-const LS_POINTS = "sailTrailPoints_v1";
-const LS_DIST = "sailTrailDistM_v1";
+const LS_POINTS  = "sailTrailPoints_v1";
+const LS_DIST    = "sailTrailDistM_v1";
 const LS_MARKERS = "sailMarkers_v1";
 
 /* ===== EMA helpers (explicit position & speed EMAs) ===== */
@@ -96,7 +110,7 @@ function showTab(tabId, btnEl) {
   if (id === "map") {
     initMarineMapOnce();
     adjustPanelOffset();
-    if (mmMap) mmMap.invalidateSize();
+    if (mmMap) mmMap.resize();
   }
 }
 
@@ -333,7 +347,7 @@ const GEO = (() => {
 })();
 
 /* =========================================================
-   Marine Map (Leaflet) + GPS integration
+   Marine Map (MapLibre GL) + GPS integration
    ========================================================= */
 const CHARTS = [
   { name: "1550A01", folder: "tiles_1550A01", minZoom: 10, maxZoom: 16 },
@@ -344,7 +358,6 @@ const CHARTS = [
 ];
 
 let mmMap,
-  baseOSM,
   mmBoat = null;
 let chartsLoaded = false;
 let emaLat = null,
@@ -352,19 +365,19 @@ let emaLat = null,
   emaHead = null,
   lastFix = null; // { latitude, longitude, t }
 let trail = [],
-  trailLine = null,
   totalDistM = 0;
 
 let courseUp = false;
 let follow = true;
 let addMarkerActive = false;
 
-let markersLayer = null;
+// MapLibre DOM markers we add (keeps API simple)
+let markersLayer = [];
 const overlayLayers = {};
 
 // --- Heading fusion & resume helpers ---
 let compassHeading = null; // from device orientation (0..360)
-let gpsHeading = null; // from geolocation heading when moving
+let gpsHeading = null;     // from geolocation heading when moving
 let prevPointForCog = null; // previous GPS fix for computed COG
 let compassListening = false;
 
@@ -402,16 +415,26 @@ function rotateCompass(deg) {
   if (n) n.style.transform = `translate(-50%,-90%) rotate(${deg}deg)`;
 }
 
+let mmBoatEl = null; // DOM element inside MapLibre Marker
+
 function applyHeadingToUi(deg) {
   const h = Number.isFinite(deg) ? ((deg % 360) + 360) % 360 : 0;
   // Smooth and store
   emaHead = smoothAngle(emaHead, h, HEADING_SMOOTH_ALPHA);
-  // Rotate needle
+  // Rotate compass needle
   rotateCompass(emaHead || 0);
-  // Rotate boat if course-up
-  if (courseUp && mmBoat) {
-    const rotNode = mmBoat._icon?.querySelector("#boat-rot");
-    if (rotNode) rotNode.setAttribute("transform", `rotate(${emaHead} 50 50)`);
+
+  // When course-up is ON: rotate the MAP, keep boat upright.
+  // When OFF: keep map north-up, rotate the boat icon.
+  if (courseUp && mmMap) {
+    mmMap.jumpTo({ bearing: emaHead || 0 });
+  }
+  if (mmBoatEl) {
+    const rotNode = mmBoatEl.querySelector("#boat-rot");
+    if (rotNode) {
+      const angle = courseUp ? 0 : (emaHead || 0);
+      rotNode.setAttribute("transform", `rotate(${angle} 50 50)`);
+    }
   }
 }
 
@@ -482,6 +505,15 @@ function forceFreshFix() {
   } catch {}
 }
 
+// Web Mercator unproject (EPSG:3857) to lat/lon (for tilemapresource.xml bounds)
+function wmUnproject(x, y) {
+  const R = 6378137;
+  const toDeg = 180 / Math.PI;
+  const lon = (x / R) * toDeg;
+  const lat = (2 * Math.atan(Math.exp(y / R)) - Math.PI / 2) * toDeg;
+  return { lat, lon };
+}
+
 async function loadChartBounds(def) {
   try {
     const url = `${def.folder}/tilemapresource.xml`;
@@ -496,9 +528,9 @@ async function loadChartBounds(def) {
       miny = parseFloat(bb.getAttribute("miny"));
     const maxx = parseFloat(bb.getAttribute("maxx")),
       maxy = parseFloat(bb.getAttribute("maxy"));
-    const sw = L.CRS.EPSG3857.unproject(L.point(minx, miny));
-    const ne = L.CRS.EPSG3857.unproject(L.point(maxx, maxy));
-    def.bounds = L.latLngBounds(sw, ne);
+    const sw = wmUnproject(minx, miny);
+    const ne = wmUnproject(maxx, maxy);
+    def.bounds = [sw.lon, sw.lat, ne.lon, ne.lat]; // [w,s,e,n]
     const fmtNode = xml.querySelector("TileFormat");
     def.ext =
       (fmtNode && (fmtNode.getAttribute("extension") || "").toLowerCase()) ||
@@ -522,26 +554,46 @@ async function ensureAllChartBounds() {
 }
 function addAllCharts() {
   CHARTS.forEach((def) => {
+    const srcId = `chart-${def.name}`;
+    const lyrId = `chart-${def.name}-lyr`;
     const url = `${def.folder}/{z}/{x}/{y}.${def.ext || "png"}`;
-    const layer = L.tileLayer(url, {
-      minZoom: def.minZ ?? def.minZoom ?? 10,
-      maxZoom: def.maxZ ?? def.maxZoom ?? 16,
-      bounds: def.bounds,
-      noWrap: true,
-      opacity: 0.98,
-    });
-    layer.addTo(mmMap);
-    overlayLayers[def.name] = layer;
+    if (!mmMap.getSource(srcId)) {
+      mmMap.addSource(srcId, {
+        type: "raster",
+        tiles: [url],
+        tileSize: 256,
+        bounds: def.bounds, // [w,s,e,n]
+        minzoom: def.minZ ?? def.minZoom ?? 10,
+        maxzoom: def.maxZ ?? def.maxZoom ?? 16,
+      });
+      mmMap.addLayer({
+        id: lyrId,
+        type: "raster",
+        source: srcId,
+        paint: { "raster-opacity": 0.98 },
+      });
+    }
   });
 
-  const alwaysOnBounds = CHARTS.filter(
-    (c) => (c.name === "1550A01" || c.name === "1550B01") && c.bounds
-  ).map((c) => c.bounds);
-  if (alwaysOnBounds.length) {
-    const union = alwaysOnBounds
-      .slice(1)
-      .reduce((acc, b) => acc.extend(b), alwaysOnBounds[0].clone());
-    mmMap.fitBounds(union.pad(0.02));
+  // Fit to union of available chart bounds
+  const bbs = CHARTS.map((c) => c.bounds).filter(Boolean);
+  if (bbs.length) {
+    const union = bbs.reduce(
+      (u, b) => [
+        Math.min(u[0], b[0]),
+        Math.min(u[1], b[1]),
+        Math.max(u[2], b[2]),
+        Math.max(u[3], b[3]),
+      ],
+      [...bbs[0]]
+    );
+    mmMap.fitBounds(
+      [
+        [union[0], union[1]],
+        [union[2], union[3]],
+      ],
+      { padding: 20 }
+    );
   }
 }
 function saveTrail() {
@@ -572,7 +624,7 @@ function loadTrail() {
 function resetTrail() {
   trail = [];
   totalDistM = 0;
-  if (trailLine) trailLine.setLatLngs(trail);
+  updateTrailSource();
   saveTrail();
   updateStats({ kts: null });
 }
@@ -650,20 +702,11 @@ function loadMarkers() {
   }
 }
 function renderMarkersFromStore() {
+  // Clear existing DOM markers
+  markersLayer.forEach((m) => m.remove());
+  markersLayer = [];
   const arr = loadMarkers();
-  markersLayer.clearLayers();
-  for (const m of arr) {
-    const mk = L.marker([m.lat, m.lng], { icon: iconFor(m.type) }).addTo(
-      markersLayer
-    );
-    const label =
-      m.type === "warn"
-        ? "⚠️ Warning"
-        : m.type === "fish"
-        ? "🐟 Fish"
-        : "📍 Other";
-    mk.bindPopup(`${label}<br>${new Date(m.ts).toLocaleString()}`);
-  }
+  for (const m of arr) addDomMarker(m.lat, m.lng, m.type, m.ts);
 }
 function addMarkerToStore(latlng, type) {
   const arr = loadMarkers();
@@ -672,19 +715,34 @@ function addMarkerToStore(latlng, type) {
 }
 function clearAllMarkers() {
   saveMarkers([]);
-  markersLayer.clearLayers();
+  markersLayer.forEach((m) => m.remove());
+  markersLayer = [];
 }
 
-/* ===== Markers: icons ===== */
+/* ===== Markers: icons (kept for compatibility; DOM markers used below) ===== */
 function iconFor(type) {
   const color =
     type === "warn" ? "#e11" : type === "fish" ? "#1a8f1a" : "#e6c300";
-  return L.divIcon({
-    className: "custom-marker",
-    html: `<div style="width:14px;height:14px;border-radius:50%;background:${color};border:2px solid #fff;box-shadow:0 0 4px rgba(0,0,0,.5)"></div>`,
-    iconSize: [18, 18],
-    iconAnchor: [9, 9],
-  });
+  return { color }; // placeholder; actual rendering uses DOM markers
+}
+
+// MapLibre DOM marker helper
+function addDomMarker(lat, lng, type, ts) {
+  const el = document.createElement("div");
+  el.style.cssText =
+    "width:14px;height:14px;border-radius:50%;border:2px solid #fff;box-shadow:0 0 4px rgba(0,0,0,.5)";
+  el.style.background =
+    type === "warn" ? "#e11" : type === "fish" ? "#1a8f1a" : "#e6c300";
+  const label =
+    type === "warn" ? "⚠️ Warning" : type === "fish" ? "🐟 Fish" : "📍 Other";
+  el.title = ts ? `${label} — ${new Date(ts).toLocaleString()}` : label;
+
+  const mk = new maplibregl.Marker({ element: el, anchor: "center" })
+    .setLngLat([lng, lat])
+    .addTo(mmMap);
+
+  markersLayer.push(mk);
+  return mk;
 }
 
 function setGpsStatus(msg) {
@@ -696,7 +754,10 @@ function setGpsStatus(msg) {
 function recenterToBoat() {
   if (emaLat != null && emaLon != null && mmMap) {
     follow = true;
-    mmMap.setView([emaLat, emaLon], Math.max(mmMap.getZoom(), 15));
+    mmMap.jumpTo({
+      center: [emaLon, emaLat],
+      zoom: Math.max(mmMap.getZoom(), 15),
+    });
     setGpsStatus("Recentered.");
     const chk = $("#mm-follow");
     if (chk) chk.checked = true;
@@ -707,13 +768,16 @@ function recenterToBoat() {
 
 function toggleCourseUp(on) {
   courseUp = !!on;
-  const rotNode = mmBoat?._icon?.querySelector("#boat-rot");
-  if (rotNode) {
-    if (courseUp && Number.isFinite(emaHead)) {
-      rotNode.setAttribute("transform", `rotate(${emaHead} 50 50)`);
-    } else {
-      rotNode.setAttribute("transform", "rotate(0 50 50)");
-    }
+  if (!mmMap) return;
+  if (courseUp) {
+    mmMap.jumpTo({ bearing: emaHead || 0 });
+    if (mmBoatEl)
+      mmBoatEl.querySelector("#boat-rot")?.setAttribute(
+        "transform",
+        "rotate(0 50 50)"
+      );
+  } else {
+    mmMap.jumpTo({ bearing: 0 });
   }
 }
 
@@ -723,10 +787,7 @@ function buildControls() {
   if (!panel || !header) return;
 
   try {
-    if (window.L && L.DomEvent) {
-      L.DomEvent.disableClickPropagation(panel);
-      L.DomEvent.disableScrollPropagation(panel);
-    }
+    // (Leaflet-specific propagation suppression skipped)
   } catch {}
 
   const doToggle = (ev) => {
@@ -775,37 +836,69 @@ function buildControls() {
 
 function initMarineMapOnce() {
   if (mmMap) return;
-  mmMap = L.map("leaflet-map", {
-    zoomControl: true,
-    attributionControl: true,
-  }).setView([45.4215, -75.6972], 12);
 
-  baseOSM = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19,
-    attribution: "&copy; OpenStreetMap contributors",
-  }).addTo(mmMap);
+  // MapLibre GL map with OSM raster style
+  mmMap = new maplibregl.Map({
+    container: "leaflet-map",
+    style: {
+      version: 8,
+      sources: {
+        osm: {
+          type: "raster",
+          tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+          tileSize: 256,
+          attribution: "© OpenStreetMap contributors",
+        },
+      },
+      layers: [{ id: "osm", type: "raster", source: "osm" }],
+    },
+    center: [-75.6972, 45.4215], // [lng, lat]
+    zoom: 12,
+    bearing: 0,
+    pitch: 0,
+  });
 
-  trailLine = L.polyline([], { weight: 3, opacity: 0.85 }).addTo(mmMap);
-  loadTrail();
-  if (trail.length) trailLine.setLatLngs(trail.map((p) => [p[0], p[1]]));
+  mmMap.addControl(
+    new maplibregl.NavigationControl({ visualizePitch: true }),
+    "top-right"
+  );
+  mmMap.addControl(
+    new maplibregl.AttributionControl({ compact: true }),
+    "bottom-right"
+  );
 
-  markersLayer = L.layerGroup().addTo(mmMap);
-  renderMarkersFromStore();
+  mmMap.on("load", () => {
+    // Trail source/layer
+    mmMap.addSource("trail", {
+      type: "geojson",
+      data: { type: "FeatureCollection", features: [] },
+    });
+    mmMap.addLayer({
+      id: "trail-line",
+      type: "line",
+      source: "trail",
+      paint: { "line-width": 3, "line-opacity": 0.85 },
+    });
 
-  mmMap.on("dragstart zoomstart", () => {
-    follow = false;
-    const chk = $("#mm-follow");
-    if (chk) chk.checked = false;
+    loadTrail();
+    updateTrailSource();
+    renderMarkersFromStore();
+    ensureAllChartBounds().then(addAllCharts);
+  });
+
+  ["dragstart", "zoomstart", "rotatestart"].forEach((ev) => {
+    mmMap.on(ev, () => {
+      follow = false;
+      const chk = $("#mm-follow");
+      if (chk) chk.checked = false;
+    });
   });
 
   mmMap.on("click", (e) => {
     if (!addMarkerActive) return;
     const type = $("#mm-marker-type")?.value || "other";
-    const mk = L.marker(e.latlng, { icon: iconFor(type) }).addTo(markersLayer);
-    const label =
-      type === "warn" ? "⚠️ Warning" : type === "fish" ? "🐟 Fish" : "📍 Other";
-    mk.bindPopup(`${label}<br>${new Date().toLocaleString()}`);
-    addMarkerToStore(e.latlng, type);
+    addDomMarker(e.lngLat.lat, e.lngLat.lng, type);
+    addMarkerToStore({ lat: e.lngLat.lat, lng: e.lngLat.lng }, type);
     addMarkerActive = false;
     const btn = $("#mm-drop-marker");
     if (btn) btn.textContent = "Drop marker";
@@ -813,7 +906,6 @@ function initMarineMapOnce() {
   });
 
   buildControls();
-  ensureAllChartBounds().then(addAllCharts);
 }
 
 function startGpsForMap() {
@@ -863,11 +955,8 @@ function onPos(p) {
   if (!Number.isFinite(instKts)) {
     const dt = lastFix ? Math.max(0.5, (now - lastFix.t) / 1000) : null;
     const d =
-      lastFix && mmMap
-        ? mmMap.distance(
-            [latitude, longitude],
-            [lastFix.latitude, lastFix.longitude]
-          )
+      lastFix != null
+        ? geoDistMeters(latitude, longitude, lastFix.latitude, lastFix.longitude)
         : null;
 
     if (dt && d != null) {
@@ -899,32 +988,28 @@ function onPos(p) {
   emaLon = posEma(longitude, emaLon);
 
   if (mmMap && !mmBoat) {
-    const boatIcon = L.divIcon({
-      className: "boat",
-      html: `<svg viewBox="0 0 100 100">
+    mmBoatEl = document.createElement("div");
+    mmBoatEl.className = "boat";
+    mmBoatEl.innerHTML = `<svg viewBox="0 0 100 100" width="40" height="40">
                <g id="boat-rot">
                  <polygon class="hull" points="50,8 74,60 50,94 26,60" fill="#003b8e" stroke="#ffffff" stroke-width="3"/>
                  <line class="mast" x1="50" y1="20" x2="50" y2="82" stroke="#ffffff" stroke-width="5" stroke-linecap="round"/>
                </g>
-             </svg>`,
-      iconSize: [40, 40],
-      iconAnchor: [20, 20],
-    });
-    mmBoat = L.marker([emaLat, emaLon], {
-      icon: boatIcon,
-      interactive: false,
-    }).addTo(mmMap);
-    mmMap.setView([emaLat, emaLon], 15);
+             </svg>`;
+    mmBoat = new maplibregl.Marker({ element: mmBoatEl, anchor: "center" })
+      .setLngLat([emaLon, emaLat])
+      .addTo(mmMap);
+    mmMap.jumpTo({ center: [emaLon, emaLat], zoom: 15 });
   } else if (mmBoat) {
-    mmBoat.setLatLng([emaLat, emaLon]);
+    mmBoat.setLngLat([emaLon, emaLat]);
   }
 
   // ---------- Trail handling (RAW distance + more frequent) ----------
   const lastPt = trail.length ? trail[trail.length - 1] : null; // [rawLat, rawLon, t]
   const dtSinceLastPt = lastPt ? (now - lastPt[2]) / 1000 : Infinity;
   let dRaw = 0;
-  if (lastPt && mmMap) {
-    dRaw = mmMap.distance([latitude, longitude], [lastPt[0], lastPt[1]]);
+  if (lastPt) {
+    dRaw = geoDistMeters(latitude, longitude, lastPt[0], lastPt[1]);
   }
 
   const shouldAdd =
@@ -938,14 +1023,14 @@ function onPos(p) {
     trail.push([latitude, longitude, now]);
     if (trail.length > TRAIL_MAX_POINTS)
       trail.splice(0, trail.length - TRAIL_MAX_POINTS);
-    if (trailLine) trailLine.setLatLngs(trail.map((p) => [p[0], p[1]]));
+    updateTrailSource();
     saveTrail();
   }
 
   // ---------- Follow pan (unconditional when ON) ----------
   if (follow && mmMap && emaLat != null && emaLon != null) {
-    // Replaces previous "pad(-0.3)" check — always keep centered, no animation
-    mmMap.setView([emaLat, emaLon], mmMap.getZoom(), { animate: false });
+    // Always keep centered, no animation lag
+    mmMap.jumpTo({ center: [emaLon, emaLat], zoom: mmMap.getZoom() });
   }
 
   updateStats({ kts });
@@ -961,6 +1046,23 @@ function onPos(p) {
   );
 }
 
+// Update trail GeoJSON source
+function updateTrailSource() {
+  if (!mmMap || !mmMap.getSource || !mmMap.getSource("trail")) return;
+  mmMap.getSource("trail").setData({
+    type: "FeatureCollection",
+    features: [
+      {
+        type: "Feature",
+        geometry: {
+          type: "LineString",
+          coordinates: trail.map((p) => [p[1], p[0]]),
+        },
+      },
+    ],
+  });
+}
+
 /* =======================
    Wake-from-idle boosters
    ======================= */
@@ -970,7 +1072,7 @@ document.addEventListener("visibilitychange", () => {
     GEO.stop();
     forceFreshFix();
     GEO.start(true);
-    if (mmMap) mmMap.invalidateSize({ animate: false });
+    if (mmMap) mmMap.resize();
     // Reset heading smoothing so the first rotation is crisp
     emaHead = null;
     setGpsStatus("Resumed — refreshing GPS & sensors…");
