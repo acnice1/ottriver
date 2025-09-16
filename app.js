@@ -20,9 +20,7 @@ function geoDistMeters(lat1, lon1, lat2, lon2) {
   const dLon = toRad(lon2 - lon1);
   const a =
     Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) *
-      Math.cos(toRad(lat2)) *
-      Math.sin(dLon / 2) ** 2;
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
   return 2 * R * Math.asin(Math.sqrt(a));
 }
 
@@ -31,27 +29,27 @@ function geoDistMeters(lat1, lon1, lat2, lon2) {
    ========================================================= */
 // Smoothing (snappier, trusts new data more)
 const POS_EMA_ALPHA = 0.75; // 0.70–0.85 recommended
-const SPD_EMA_ALPHA = 0.7;  // 0.60–0.80 recommended
+const SPD_EMA_ALPHA = 0.7; // 0.60–0.80 recommended
 const HEADING_SMOOTH_ALPHA = 0.5;
 
 // Speed / movement gating
 const MOVING_ENTER_KTS = 1.0;
 const MOVING_EXIT_KTS = 0.4;
-const SPEED_MIN_MOVE_M = 2;   // ↓ from 5 (lets slow speeds register)
+const SPEED_MIN_MOVE_M = 2; // ↓ from 5 (lets slow speeds register)
 const SPEED_ACC_FACTOR = 0.2; // ↓ from 0.6 (less harsh accuracy gate)
 
 // Trail cadence (more frequent, based on RAW fixes)
 const TRAIL_MAX_POINTS = 2000;
-const TRAIL_MIN_DIST_M = 2;   // ↓ from 5
-const TRAIL_MIN_SEC    = 0.75; // 0.5–1 s recommended
+const TRAIL_MIN_DIST_M = 2; // ↓ from 5
+const TRAIL_MIN_SEC = 0.75; // 0.5–1 s recommended
 
 // Staleness / fallbacks
-const MAX_STALE_MS      = 4000; // watchdog pull-fresh threshold
+const MAX_STALE_MS = 4000; // watchdog pull-fresh threshold
 const GEO_LO_MAX_AGE_MS = 30000; // ↓ from 600000 (≤30s for low-accuracy retry)
 
 // LocalStorage keys
-const LS_POINTS  = "sailTrailPoints_v1";
-const LS_DIST    = "sailTrailDistM_v1";
+const LS_POINTS = "sailTrailPoints_v1";
+const LS_DIST = "sailTrailDistM_v1";
 const LS_MARKERS = "sailMarkers_v1";
 
 /* ===== EMA helpers (explicit position & speed EMAs) ===== */
@@ -377,7 +375,7 @@ const overlayLayers = {};
 
 // --- Heading fusion & resume helpers ---
 let compassHeading = null; // from device orientation (0..360)
-let gpsHeading = null;     // from geolocation heading when moving
+let gpsHeading = null; // from geolocation heading when moving
 let prevPointForCog = null; // previous GPS fix for computed COG
 let compassListening = false;
 
@@ -432,7 +430,7 @@ function applyHeadingToUi(deg) {
   if (mmBoatEl) {
     const rotNode = mmBoatEl.querySelector("#boat-rot");
     if (rotNode) {
-      const angle = courseUp ? 0 : (emaHead || 0);
+      const angle = courseUp ? 0 : emaHead || 0;
       rotNode.setAttribute("transform", `rotate(${angle} 50 50)`);
     }
   }
@@ -772,10 +770,9 @@ function toggleCourseUp(on) {
   if (courseUp) {
     mmMap.jumpTo({ bearing: emaHead || 0 });
     if (mmBoatEl)
-      mmBoatEl.querySelector("#boat-rot")?.setAttribute(
-        "transform",
-        "rotate(0 50 50)"
-      );
+      mmBoatEl
+        .querySelector("#boat-rot")
+        ?.setAttribute("transform", "rotate(0 50 50)");
   } else {
     mmMap.jumpTo({ bearing: 0 });
   }
@@ -852,7 +849,7 @@ function initMarineMapOnce() {
       },
       layers: [{ id: "osm", type: "raster", source: "osm" }],
     },
-    center: [-75.6972, 45.4215], // [lng, lat]
+    center: [-75.8264, 45.3513], // Nepean Sailing Club. Ottawa = -75.6972, 45.4215 [lng, lat]
     zoom: 12,
     bearing: 0,
     pitch: 0,
@@ -956,7 +953,12 @@ function onPos(p) {
     const dt = lastFix ? Math.max(0.5, (now - lastFix.t) / 1000) : null;
     const d =
       lastFix != null
-        ? geoDistMeters(latitude, longitude, lastFix.latitude, lastFix.longitude)
+        ? geoDistMeters(
+            latitude,
+            longitude,
+            lastFix.latitude,
+            lastFix.longitude
+          )
         : null;
 
     if (dt && d != null) {
