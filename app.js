@@ -849,7 +849,7 @@ function initMarineMapOnce() {
       },
       layers: [{ id: "osm", type: "raster", source: "osm" }],
     },
-    center: [-75.8264, 45.3513], // Nepean Sailing Club. Ottawa = -75.6972, 45.4215 [lng, lat]
+    center: [-75.8266, 45.3513], // Nepean Sailing Club. Ottawa = -75.6972, 45.4215 [lng, lat]
     zoom: 12,
     bearing: 0,
     pitch: 0,
