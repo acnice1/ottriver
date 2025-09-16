@@ -98,7 +98,21 @@
     .compass .north { position: absolute; top: 2px; left: 50%; transform: translateX(-50%); font-size: 9px; color: #333; }
 
     /* Boat marker */
+    
+    /* Old boat marker (Leaflet)
     .boat { width: 40px; height: 40px; margin-left: -20px; margin-top: -20px; filter: drop-shadow(0 0 3px rgba(0,0,0,.5)); }
+    .boat svg { width: 40px; height: 40px; }
+    */
+    
+    /* MapLibre marker is anchored at element center; remove Leaflet-era offsets.
+       Shift up ~17px so the bow tip sits on the coordinate. */
+    .boat {
+      width: 40px; height: 40px;
+      margin: 0;
+      filter: drop-shadow(0 0 3px rgba(0,0,0,.5));
+      transform: translateY(-17px);
+      pointer-events: none; /* don't steal map clicks */
+    }
     .boat svg { width: 40px; height: 40px; }
     .boat .hull { fill: #003b8e; stroke: #ffffff; stroke-width: 3; }
     .boat .mast { stroke: #ffffff; stroke-width: 5; stroke-linecap: round; }
