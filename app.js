@@ -28,7 +28,6 @@ function geoDistMeters(lat1, lon1, lat2, lon2) {
    Tuning parameters — all tweakables up front
    ========================================================= */
 // Smoothing (snappier, trusts new data more)
-const POS_EMA_ALPHA = 0.75; // 0.70–0.85 recommended
 const SPD_EMA_ALPHA = 0.7; // 0.60–0.80 recommended
 const HEADING_SMOOTH_ALPHA = 0.5;
 
@@ -42,10 +41,23 @@ const SPEED_ACC_FACTOR = 0.2; // ↓ from 0.6 (less harsh accuracy gate)
 const TRAIL_MAX_POINTS = 2000;
 const TRAIL_MIN_DIST_M = 2; // ↓ from 5
 const TRAIL_MIN_SEC = 0.75; // 0.5–1 s recommended
+const TRAIL_REDRAW_MS = 1000;
+const TRAIL_SAVE_MS = 15000;
+const TRAIL_MAX_ACC_M = 30;
 
 // Staleness / fallbacks
 const MAX_STALE_MS = 4000; // watchdog pull-fresh threshold
+const NAV_MAX_FIX_AGE_MS = 5000;
+const NAV_MAX_ACC_M = 15;
+const NAV_MAX_PLAUSIBLE_KTS = 15;
+const NAV_MIN_UNCERTAINTY_GROWTH_MPS = 0.75;
 const GEO_LO_MAX_AGE_MS = 30000; // ↓ from 600000 (≤30s for low-accuracy retry)
+const GEO_HIGH_RETRY_MS = 30000;
+const COMPASS_MAX_AGE_MS = 2000;
+const COG_MIN_KTS = 1.0;
+const COG_ANCHOR_MAX_MS = 15000;
+const MAP_BEARING_MIN_MS = 125;
+const MAP_BEARING_MIN_DEG = 1.5;
 
 // LocalStorage keys
 const LS_POINTS = "sailTrailPoints_v1";
@@ -55,7 +67,6 @@ const LS_MARKERS = "sailMarkers_v1";
 /* ===== EMA helpers (explicit position & speed EMAs) ===== */
 const makeEma = (alpha) => (current, prev) =>
   prev == null ? current : alpha * current + (1 - alpha) * prev;
-const posEma = makeEma(POS_EMA_ALPHA);
 const spdEma = makeEma(SPD_EMA_ALPHA);
 
 /* ===== Speed smoothing & stationary detection ===== */
@@ -201,12 +212,14 @@ $("#calc-offset")?.addEventListener("click", () => {
 });
 
 /* =========================================================
-   Singleton GEO watcher (with Firefox prompt kick)
+   Singleton GEO watcher
    ========================================================= */
 const GEO = (() => {
   let watchId = null;
+  let starting = false;
+  let generation = 0;
+  let retryTimer = null;
   const listeners = new Set();
-  let retriedLowAcc = false;
 
   const notify = (type, payload) => {
     for (const fn of listeners) {
@@ -220,39 +233,39 @@ const GEO = (() => {
     return () => listeners.delete(fn);
   };
   const stop = () => {
+    generation++;
+    if (retryTimer != null) {
+      clearTimeout(retryTimer);
+      retryTimer = null;
+    }
     if (watchId != null) {
       navigator.geolocation.clearWatch(watchId);
       watchId = null;
     }
   };
 
-  function getOnce(opts) {
-    return new Promise((resolve, reject) => {
-      navigator.geolocation.getCurrentPosition(resolve, reject, opts);
-    });
-  }
-
-  async function start(preferHighAccuracy = true) {
+  function start(preferHighAccuracy = true) {
     if (!("geolocation" in navigator)) {
       notify("error", new Error("Geolocation not supported"));
       return;
     }
-
+    if (watchId != null || starting) return;
+    starting = true;
+    // Permission reporting must not hold up the continuous GPS watch.
     try {
       if (navigator.permissions?.query) {
-        const st = await navigator.permissions.query({ name: "geolocation" });
-        notify("perm", st.state);
+        navigator.permissions.query({ name: "geolocation" })
+          .then((st) => notify("perm", st.state))
+          .catch(() => {});
       }
     } catch {}
-
     notify("diag", {
       secure: window.isSecureContext,
       inIframe: window.top !== window.self,
     });
-    if (watchId != null) return;
 
     const hi = {
-      enableHighAccuracy: preferHighAccuracy,
+      enableHighAccuracy: true,
       maximumAge: 0,
       timeout: 15000,
     };
@@ -262,30 +275,48 @@ const GEO = (() => {
       timeout: 30000,
     };
 
-    try {
-      await getOnce({ ...hi, timeout: 5000 });
-    } catch {}
-
-    function onPos(p) {
-      retriedLowAcc = false;
-      notify("position", p);
+    function scheduleHighRetry() {
+      if (retryTimer != null) clearTimeout(retryTimer);
+      retryTimer = setTimeout(() => {
+        retryTimer = null;
+        if (watchId != null) startWatch("high");
+      }, GEO_HIGH_RETRY_MS);
     }
-    function onErr(e) {
-      notify("error", e);
-      if (
-        !retriedLowAcc &&
-        (e?.code === 2 ||
-          String(e?.message || "")
-            .toLowerCase()
-            .includes("unavailable"))
-      ) {
-        retriedLowAcc = true;
-        stop();
-        watchId = navigator.geolocation.watchPosition(onPos, onErr, lo);
-        notify("retry", "low-accuracy");
+
+    function startWatch(mode) {
+      if (watchId != null) navigator.geolocation.clearWatch(watchId);
+      watchId = null;
+      const myGeneration = ++generation;
+      try {
+        watchId = navigator.geolocation.watchPosition(
+          (p) => {
+            if (myGeneration !== generation) return;
+            if (mode === "high" && retryTimer != null) {
+              clearTimeout(retryTimer);
+              retryTimer = null;
+            }
+            notify("position", p);
+          },
+          (e) => {
+            if (myGeneration !== generation) return;
+            notify("error", e);
+            const unavailable = e?.code === 2 || e?.code === 3 ||
+              String(e?.message || "").toLowerCase().includes("unavailable");
+            if (mode === "high" && unavailable) {
+              notify("retry", "low-accuracy");
+              startWatch("low");
+              scheduleHighRetry();
+            }
+          },
+          mode === "high" ? hi : lo
+        );
+      } catch (e) {
+        notify("error", e);
       }
     }
-    watchId = navigator.geolocation.watchPosition(onPos, onErr, hi);
+
+    startWatch(preferHighAccuracy ? "high" : "low");
+    starting = false;
   }
 
   return { start, stop, on };
@@ -358,12 +389,22 @@ const CHARTS = [
 let mmMap,
   mmBoat = null;
 let chartsLoaded = false;
-let emaLat = null,
-  emaLon = null,
+let plotLat = null,
+  plotLon = null,
   emaHead = null,
-  lastFix = null; // { latitude, longitude, t }
+  lastFix = null; // last displayed GPS fix { latitude, longitude, t, acc }
+let navFixSuppressed = false;
+let navAlertEl = null;
+let navIssue = "Waiting for a reliable GPS fix";
+let chartQualityText = "Marine chart placement has not been checked";
+let freshFixInFlight = false;
 let trail = [],
   totalDistM = 0;
+let trailWasMoving = false;
+let trailRedrawAt = 0;
+let trailRedrawTimer = null;
+let trailSaveTimer = null;
+let trailDirty = false;
 
 let courseUp = false;
 let follow = true;
@@ -375,9 +416,13 @@ const overlayLayers = {};
 
 // --- Heading fusion & resume helpers ---
 let compassHeading = null; // from device orientation (0..360)
-let gpsHeading = null; // from geolocation heading when moving
-let prevPointForCog = null; // previous GPS fix for computed COG
+let compassHeadingAt = 0;
+let cogAnchor = null; // distance-gated baseline for calculated COG
 let compassListening = false;
+let compassStarting = false;
+let mapBearingAt = 0;
+let mapBearing = null;
+let mapBearingTimer = null;
 
 // Shortest-path angular smoothing (wrap-aware)
 function smoothAngle(prev, next, a = HEADING_SMOOTH_ALPHA) {
@@ -387,25 +432,41 @@ function smoothAngle(prev, next, a = HEADING_SMOOTH_ALPHA) {
   return (prev + a * delta + 360) % 360;
 }
 
-function chooseHeading(rawGpsHeading, speed, lat, lon) {
-  // Priority: device compass > GPS heading (>~1 kt) > computed COG
-  if (Number.isFinite(compassHeading)) return compassHeading;
-
-  const gh = Number.isFinite(rawGpsHeading) ? rawGpsHeading : gpsHeading;
-  if (Number.isFinite(gh) && (speed || 0) > 0.5)
-    return ((gh % 360) + 360) % 360;
-
-  if (prevPointForCog && Number.isFinite(lat) && Number.isFinite(lon)) {
-    const r = Math.PI / 180;
-    const dLon = (lon - prevPointForCog.lon) * r;
-    const y = Math.sin(dLon) * Math.cos(lat * r);
-    const x =
-      Math.cos(prevPointForCog.lat * r) * Math.sin(lat * r) -
-      Math.sin(prevPointForCog.lat * r) * Math.cos(lat * r) * Math.cos(dLon);
-    let brng = (Math.atan2(y, x) * 180) / Math.PI;
-    return (brng + 360) % 360;
+function chooseHeading(rawGpsHeading, speedKts, lat, lon, accuracy, timestamp) {
+  // GPS course is the boat's direction of travel when moving; the phone
+  // compass is useful only at low speed and may not align with the hull.
+  if (!moving || speedKts < COG_MIN_KTS) {
+    cogAnchor = { lat, lon, t: timestamp };
+  } else {
+    if (Number.isFinite(rawGpsHeading)) {
+      cogAnchor = { lat, lon, t: timestamp };
+      return ((rawGpsHeading % 360) + 360) % 360;
+    }
+    // Use the previous fix on entry; accumulate displacement only while the
+    // direction is too small relative to GPS accuracy to calculate safely.
+    if (!cogAnchor) {
+      cogAnchor = lastFix
+        ? { lat: lastFix.latitude, lon: lastFix.longitude, t: lastFix.t }
+        : { lat, lon, t: timestamp };
+    }
+    const d = geoDistMeters(cogAnchor.lat, cogAnchor.lon, lat, lon);
+    if (timestamp - cogAnchor.t > COG_ANCHOR_MAX_MS) {
+      cogAnchor = { lat, lon, t: timestamp };
+    } else if (d >= Math.max(2, Number.isFinite(accuracy) ? accuracy * 0.5 : 2)) {
+      const r = Math.PI / 180;
+      const dLon = (lon - cogAnchor.lon) * r;
+      const y = Math.sin(dLon) * Math.cos(lat * r);
+      const x =
+        Math.cos(cogAnchor.lat * r) * Math.sin(lat * r) -
+        Math.sin(cogAnchor.lat * r) * Math.cos(lat * r) * Math.cos(dLon);
+      cogAnchor = { lat, lon, t: timestamp };
+      return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+    }
   }
-  return emaHead; // fallback
+  if (!moving && Number.isFinite(compassHeading) &&
+      Date.now() - compassHeadingAt <= COMPASS_MAX_AGE_MS)
+    return compassHeading;
+  return null; // No current course or fresh compass reading.
 }
 
 function rotateCompass(deg) {
@@ -415,8 +476,33 @@ function rotateCompass(deg) {
 
 let mmBoatEl = null; // DOM element inside MapLibre Marker
 
+function updateCourseUpBearing(force = false) {
+  if (!courseUp || !mmMap || !Number.isFinite(emaHead)) return;
+  const delta = mapBearing == null ? Infinity :
+    Math.abs(((emaHead - mapBearing + 540) % 360) - 180);
+  if (!force && delta < MAP_BEARING_MIN_DEG) return;
+  const elapsed = performance.now() - mapBearingAt;
+  if (!force && mapBearing != null && elapsed < MAP_BEARING_MIN_MS) {
+    if (mapBearingTimer == null) {
+      mapBearingTimer = setTimeout(() => {
+        mapBearingTimer = null;
+        updateCourseUpBearing();
+      }, MAP_BEARING_MIN_MS - elapsed);
+    }
+    return;
+  }
+  if (mapBearingTimer != null) {
+    clearTimeout(mapBearingTimer);
+    mapBearingTimer = null;
+  }
+  mmMap.jumpTo({ bearing: emaHead });
+  mapBearing = emaHead;
+  mapBearingAt = performance.now();
+}
+
 function applyHeadingToUi(deg) {
-  const h = Number.isFinite(deg) ? ((deg % 360) + 360) % 360 : 0;
+  if (!Number.isFinite(deg)) return; // Keep the last orientation until a new heading arrives.
+  const h = ((deg % 360) + 360) % 360;
   // Smooth and store
   emaHead = smoothAngle(emaHead, h, HEADING_SMOOTH_ALPHA);
   // Rotate compass needle
@@ -424,9 +510,7 @@ function applyHeadingToUi(deg) {
 
   // When course-up is ON: rotate the MAP, keep boat upright.
   // When OFF: keep map north-up, rotate the boat icon.
-  if (courseUp && mmMap) {
-    mmMap.jumpTo({ bearing: emaHead || 0 });
-  }
+  updateCourseUpBearing();
   if (mmBoatEl) {
     const rotNode = mmBoatEl.querySelector("#boat-rot");
     if (rotNode) {
@@ -437,29 +521,40 @@ function applyHeadingToUi(deg) {
 }
 
 async function enableCompass() {
-  if (compassListening || !window.DeviceOrientationEvent) return;
+  if (compassListening || compassStarting || !window.DeviceOrientationEvent) return;
+  compassStarting = true;
 
+  // Headings refer to the top of the displayed screen, so a phone used in
+  // landscape needs its natural device orientation adjusted to screen rotation.
+  const screenAngle = () => {
+    const angle = window.screen?.orientation?.angle ?? window.orientation ?? 0;
+    return Number.isFinite(angle) ? angle : 0;
+  };
   const onDO = (e) => {
     let h = null;
-    if (typeof e.webkitCompassHeading === "number") {
-      // iOS: already clockwise from north
+    if (Number.isFinite(e.webkitCompassHeading)) {
+      if (Number.isFinite(e.webkitCompassAccuracy) &&
+          (e.webkitCompassAccuracy < 0 || e.webkitCompassAccuracy > 30)) return;
+      // iOS compass is north-referenced even when e.absolute is unavailable.
       h = e.webkitCompassHeading;
-    } else if (typeof e.alpha === "number") {
-      // Best-effort: treat alpha as clockwise from north
+    } else if (e.absolute === true && Number.isFinite(e.alpha) &&
+               (!Number.isFinite(e.beta) || Math.abs(e.beta) <= 65) &&
+               (!Number.isFinite(e.gamma) || Math.abs(e.gamma) <= 65)) {
+      // Relative alpha values have no north reference and must be ignored.
       h = (360 - e.alpha) % 360;
     }
-    if (h != null && isFinite(h)) {
-      compassHeading = (h + 360) % 360;
-      applyHeadingToUi(compassHeading); // immediate UI update
+    if (h != null) {
+      compassHeading = ((h - screenAngle()) % 360 + 360) % 360;
+      compassHeadingAt = Date.now();
+      // Sensor events should not override GPS course while under way.
+      if (!moving) applyHeadingToUi(compassHeading);
     }
   };
 
   const attach = () => {
-    const evt =
-      "ondeviceorientationabsolute" in window
-        ? "deviceorientationabsolute"
-        : "deviceorientation";
-    window.addEventListener(evt, onDO, { passive: true });
+    // Both event names are safe to subscribe to; only absolute samples pass.
+    window.addEventListener("deviceorientationabsolute", onDO, { passive: true });
+    window.addEventListener("deviceorientation", onDO, { passive: true });
     compassListening = true;
   };
 
@@ -475,32 +570,28 @@ async function enableCompass() {
     }
   } catch {
     /* ignore */
+  } finally {
+    compassStarting = false;
   }
 }
 
 function forceFreshFix() {
-  if (!("geolocation" in navigator)) return;
+  if (!("geolocation" in navigator) || !mmMap || freshFixInFlight) return;
+  freshFixInFlight = true;
   try {
     navigator.geolocation.getCurrentPosition(
       (p) => {
-        // Only run full map pipeline if map exists; otherwise just refresh lastFix
-        if (mmMap) {
-          onPos(p);
-        } else {
-          const { latitude, longitude } = p.coords || {};
-          if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
-            lastFix = { latitude, longitude, t: p.timestamp };
-          }
-        }
+        freshFixInFlight = false;
+        onPos(p);
       },
-      () => {},
+      () => { freshFixInFlight = false; },
       {
         enableHighAccuracy: true,
         maximumAge: 0,
         timeout: 8000,
       }
     );
-  } catch {}
+  } catch { freshFixInFlight = false; }
 }
 
 // Web Mercator unproject (EPSG:3857) to lat/lon (for tilemapresource.xml bounds)
@@ -556,50 +647,62 @@ function addAllCharts() {
     const lyrId = `chart-${def.name}-lyr`;
     const url = `${def.folder}/{z}/{x}/{y}.${def.ext || "png"}`;
     if (!mmMap.getSource(srcId)) {
-      mmMap.addSource(srcId, {
+      const source = {
         type: "raster",
         tiles: [url],
         tileSize: 256,
-        bounds: def.bounds, // [w,s,e,n]
         minzoom: def.minZ ?? def.minZoom ?? 10,
         maxzoom: def.maxZ ?? def.maxZoom ?? 16,
-      });
+      };
+      if (def.bounds) source.bounds = def.bounds;
+      mmMap.addSource(srcId, source);
       mmMap.addLayer({
         id: lyrId,
         type: "raster",
         source: srcId,
         paint: { "raster-opacity": 0.98 },
-      });
+      }, mmMap.getLayer("nav-accuracy-fill") ? "nav-accuracy-fill" : undefined);
     }
   });
-
-  // Fit to union of available chart bounds
-  const bbs = CHARTS.map((c) => c.bounds).filter(Boolean);
-  if (bbs.length) {
-    const union = bbs.reduce(
-      (u, b) => [
-        Math.min(u[0], b[0]),
-        Math.min(u[1], b[1]),
-        Math.max(u[2], b[2]),
-        Math.max(u[3], b[3]),
-      ],
-      [...bbs[0]]
-    );
-    mmMap.fitBounds(
-      [
-        [union[0], union[1]],
-        [union[2], union[3]],
-      ],
-      { padding: 20 }
-    );
-  }
+  if (mmMap.getLayer("trail-line") && mmMap.getLayer("nav-accuracy-fill"))
+    mmMap.moveLayer("trail-line", "nav-accuracy-fill");
+  chartQualityText = "Marine chart alignment has not been independently verified";
+  refreshNavStatus();
 }
 function saveTrail() {
   try {
     localStorage.setItem(LS_POINTS, JSON.stringify(trail));
     localStorage.setItem(LS_DIST, String(totalDistM));
+    trailDirty = false;
   } catch (e) {
     console.warn("trail save failed", e);
+  }
+}
+function queueTrailSave() {
+  trailDirty = true;
+  if (trailSaveTimer != null) return;
+  trailSaveTimer = setTimeout(() => {
+    trailSaveTimer = null;
+    if (trailDirty) saveTrail();
+  }, TRAIL_SAVE_MS);
+}
+function flushTrailSave() {
+  if (trailSaveTimer != null) clearTimeout(trailSaveTimer);
+  trailSaveTimer = null;
+  if (trailDirty) saveTrail();
+}
+function queueTrailRedraw() {
+  if (!mmMap?.getSource?.("trail")) return;
+  const wait = Math.max(0, TRAIL_REDRAW_MS - (Date.now() - trailRedrawAt));
+  if (!wait) {
+    if (trailRedrawTimer != null) clearTimeout(trailRedrawTimer);
+    trailRedrawTimer = null;
+    updateTrailSource();
+  } else if (trailRedrawTimer == null) {
+    trailRedrawTimer = setTimeout(() => {
+      trailRedrawTimer = null;
+      updateTrailSource();
+    }, wait);
   }
 }
 function loadTrail() {
@@ -608,20 +711,26 @@ function loadTrail() {
     if (Array.isArray(pts)) {
       const now = Date.now();
       trail = pts
-        .slice(0, TRAIL_MAX_POINTS)
+        .slice(-TRAIL_MAX_POINTS)
         .map((p) =>
           Array.isArray(p) && p.length >= 2 ? [p[0], p[1], p[2] ?? now] : p
         );
     }
     totalDistM = parseFloat(localStorage.getItem(LS_DIST) || "0") || 0;
+    trailWasMoving = false;
   } catch (e) {
     trail = [];
     totalDistM = 0;
   }
 }
 function resetTrail() {
+  if (trailRedrawTimer != null) clearTimeout(trailRedrawTimer);
+  if (trailSaveTimer != null) clearTimeout(trailSaveTimer);
+  trailRedrawTimer = trailSaveTimer = null;
   trail = [];
   totalDistM = 0;
+  trailWasMoving = false;
+  trailDirty = true;
   updateTrailSource();
   saveTrail();
   updateStats({ kts: null });
@@ -746,21 +855,121 @@ function addDomMarker(lat, lng, type, ts) {
 function setGpsStatus(msg) {
   const el = document.getElementById("mm-gps-status");
   if (el) el.textContent = msg || "";
-  if (msg) console.log("[GPS]", msg);
+}
+
+function ensureNavAlert() {
+  if (navAlertEl || !mmMap) return;
+  navAlertEl = document.createElement("div");
+  navAlertEl.id = "mm-nav-alert";
+  navAlertEl.setAttribute("role", "status");
+  navAlertEl.style.cssText =
+    "position:absolute;left:12px;bottom:12px;z-index:3;max-width:min(420px,80vw);" +
+    "padding:8px 11px;border-radius:6px;background:#7c2020;color:white;" +
+    "font:600 13px/1.4 Arial,sans-serif;white-space:pre-line;pointer-events:none;";
+  mmMap.getContainer().appendChild(navAlertEl);
+  refreshNavStatus();
+}
+
+function accuracyPolygon(lat, lon, radius) {
+  const coords = [];
+  const lat1 = lat * Math.PI / 180, lon1 = lon * Math.PI / 180;
+  const arc = radius / 6371000;
+  for (let i = 0; i <= 48; i++) {
+    const bearing = i * Math.PI * 2 / 48;
+    const lat2 = Math.asin(Math.sin(lat1) * Math.cos(arc) +
+      Math.cos(lat1) * Math.sin(arc) * Math.cos(bearing));
+    const lon2 = lon1 + Math.atan2(Math.sin(bearing) * Math.sin(arc) * Math.cos(lat1),
+      Math.cos(arc) - Math.sin(lat1) * Math.sin(lat2));
+    coords.push([lon2 * 180 / Math.PI, lat2 * 180 / Math.PI]);
+  }
+  return { type: "Feature", geometry: { type: "Polygon", coordinates: [coords] }, properties: {} };
+}
+
+function accuracyRingRadius() {
+  if (!lastFix || !Number.isFinite(lastFix.acc)) return null;
+  const age = Math.max(0, (Date.now() - lastFix.t) / 1000);
+  return Math.min(50000, lastFix.acc +
+    Math.max(NAV_MIN_UNCERTAINTY_GROWTH_MPS, lastFix.speedMps) *
+    Math.min(age, NAV_MAX_FIX_AGE_MS / 1000) +
+    NAV_MAX_PLAUSIBLE_KTS / 1.94384 *
+    Math.max(0, age - NAV_MAX_FIX_AGE_MS / 1000));
+}
+
+function updateAccuracyRing() {
+  const source = mmMap?.getSource?.("nav-accuracy");
+  if (!source) return;
+  const radius = accuracyRingRadius();
+  source.setData({
+    type: "FeatureCollection",
+    features: radius != null
+      ? [accuracyPolygon(lastFix.latitude, lastFix.longitude, radius)] : [],
+  });
+}
+
+function refreshNavStatus() {
+  const age = lastFix ? Math.max(0, (Date.now() - lastFix.t) / 1000) : null;
+  const current = !!lastFix && !navFixSuppressed &&
+    Date.now() - lastFix.t >= -1000 &&
+    Date.now() - lastFix.t <= NAV_MAX_FIX_AGE_MS &&
+    Number.isFinite(lastFix.acc) && lastFix.acc <= NAV_MAX_ACC_M;
+  if (mmBoatEl) {
+    mmBoatEl.style.visibility = "visible";
+    mmBoatEl.classList.toggle("uncertain", !current);
+  }
+  // The expanding map accuracy area is paused; the marker has one fixed ring.
+  // updateAccuracyRing();
+  if (!navAlertEl) return;
+  const radius = accuracyRingRadius();
+  const ringRadius = radius == null ? null : Math.ceil(radius);
+  const chartBounds = CHARTS.filter((def) => def.bounds);
+  const outsideChart = current && chartBounds.length > 0 &&
+    chartBounds.length === CHARTS.length &&
+    !chartBounds.some((def) =>
+    lastFix.longitude >= def.bounds[0] && lastFix.longitude <= def.bounds[2] &&
+    lastFix.latitude >= def.bounds[1] && lastFix.latitude <= def.bounds[3]);
+  const accuracy = lastFix && Number.isFinite(lastFix.acc)
+    ? `±${Math.round(lastFix.acc)} m` : "accuracy unknown";
+  const ring = ringRadius == null ? "no accuracy ring" :
+    ringRadius >= 50000 ? "ring capped at 50 km" : `ring ~${ringRadius} m`;
+  const position = !lastFix ? navIssue : current
+    ? `GPS ${accuracy} · ${age.toFixed(1)} s old · ${ring}`
+    : `UNCERTAIN — ${navFixSuppressed ? `${navIssue} · ` : ""}` +
+      `last reported position ${accuracy} · ${age.toFixed(0)} s old · ${ring} · yellow boat`;
+  navAlertEl.textContent = `${position}\n${outsideChart ? "Outside detected chart bounds — base map only" : chartQualityText}`;
+  navAlertEl.style.background = current ? "#244657" : "#7c2020";
+}
+
+function validateNavigationFix(p, receivedAt = Date.now()) {
+  const c = p?.coords;
+  if (!c || !Number.isFinite(c.latitude) || Math.abs(c.latitude) > 90 ||
+      !Number.isFinite(c.longitude) || Math.abs(c.longitude) > 180)
+    return "GPS coordinates invalid";
+  if (!Number.isFinite(p.timestamp) ||
+      p.timestamp - receivedAt > 1000)
+    return "GPS time invalid";
+  if (lastFix && p.timestamp > lastFix.t) {
+    const dt = (p.timestamp - lastFix.t) / 1000;
+    const d = geoDistMeters(lastFix.latitude, lastFix.longitude, c.latitude, c.longitude);
+    if (dt <= 30 && d > NAV_MAX_PLAUSIBLE_KTS / 1.94384 * dt +
+        (Number.isFinite(lastFix.acc) ? lastFix.acc : 0) +
+        (Number.isFinite(c.accuracy) && c.accuracy > 0 ? c.accuracy : 0))
+      return "GPS position jumped implausibly; showing last known fix";
+  }
+  return null;
 }
 
 function recenterToBoat() {
-  if (emaLat != null && emaLon != null && mmMap) {
+  if (plotLat != null && plotLon != null && mmMap && lastFix) {
     follow = true;
     mmMap.jumpTo({
-      center: [emaLon, emaLat],
+      center: [plotLon, plotLat],
       zoom: Math.max(mmMap.getZoom(), 15),
     });
-    setGpsStatus("Recentered.");
+    setGpsStatus("Recentered to last reported GPS position; check the uncertainty indicator.");
     const chk = $("#mm-follow");
     if (chk) chk.checked = true;
   } else {
-    setGpsStatus("No GPS fix yet — start GPS first.");
+    setGpsStatus("No GPS position has been received yet.");
   }
 }
 
@@ -768,13 +977,18 @@ function toggleCourseUp(on) {
   courseUp = !!on;
   if (!mmMap) return;
   if (courseUp) {
-    mmMap.jumpTo({ bearing: emaHead || 0 });
+    if (Number.isFinite(emaHead)) updateCourseUpBearing(true);
     if (mmBoatEl)
       mmBoatEl
         .querySelector("#boat-rot")
         ?.setAttribute("transform", "rotate(0 50 50)");
   } else {
+    if (mapBearingTimer != null) clearTimeout(mapBearingTimer);
+    mapBearingTimer = null;
+    mapBearing = null;
     mmMap.jumpTo({ bearing: 0 });
+    mmBoatEl?.querySelector("#boat-rot")
+      ?.setAttribute("transform", `rotate(${emaHead || 0} 50 50)`);
   }
 }
 
@@ -833,6 +1047,8 @@ function buildControls() {
 
 function initMarineMapOnce() {
   if (mmMap) return;
+  // Restore saved points before live GPS can add points during map loading.
+  loadTrail();
 
   // MapLibre GL map with OSM raster style
   mmMap = new maplibregl.Map({
@@ -854,6 +1070,8 @@ function initMarineMapOnce() {
     bearing: 0,
     pitch: 0,
   });
+  // The large map warning panel is paused at the user's request.
+  // ensureNavAlert();
 
   mmMap.addControl(
     new maplibregl.NavigationControl({ visualizePitch: true }),
@@ -876,15 +1094,30 @@ function initMarineMapOnce() {
       source: "trail",
       paint: { "line-width": 3, "line-opacity": 0.85 },
     });
+    mmMap.addSource("nav-accuracy", {
+      type: "geojson",
+      data: { type: "FeatureCollection", features: [] },
+    });
+    mmMap.addLayer({
+      id: "nav-accuracy-fill", type: "fill", source: "nav-accuracy",
+      paint: { "fill-color": "#1b83be", "fill-opacity": 0.13 },
+    });
+    mmMap.addLayer({
+      id: "nav-accuracy-outline", type: "line", source: "nav-accuracy",
+      paint: { "line-color": "#1175aa", "line-width": 2 },
+    });
 
-    loadTrail();
     updateTrailSource();
+    // updateAccuracyRing();
     renderMarkersFromStore();
     ensureAllChartBounds().then(addAllCharts);
   });
 
   ["dragstart", "zoomstart", "rotatestart"].forEach((ev) => {
-    mmMap.on(ev, () => {
+    mmMap.on(ev, (event) => {
+      // Camera calls such as jumpTo also fire these events, but have no
+      // originating pointer, wheel, touch, or keyboard event.
+      if (!event.originalEvent) return;
       follow = false;
       const chk = $("#mm-follow");
       if (chk) chk.checked = false;
@@ -933,6 +1166,7 @@ function startGpsForMap() {
   }
 
   GEO.start(true);
+  forceFreshFix();
 }
 
 /* Prevent duplicate GEO.on wiring for the map */
@@ -940,17 +1174,32 @@ let mapGpsBound = false;
 let mapUnsub = null;
 
 function onPos(p) {
+  // Ignore an older result from the watch or the parallel one-shot. It must
+  // not displace or invalidate a newer accepted position.
+  if (lastFix && Number.isFinite(p?.timestamp) && p.timestamp <= lastFix.t) return;
+  const reason = validateNavigationFix(p);
+  if (reason) {
+    navFixSuppressed = true;
+    navIssue = reason;
+    refreshNavStatus();
+    setGpsStatus(reason);
+    return;
+  }
   const { latitude, longitude, heading, speed, accuracy } = p.coords;
   const now = p.timestamp;
-  const acc = Number.isFinite(accuracy) ? accuracy : 9999;
+  const acc = Number.isFinite(accuracy) && accuracy > 0 ? accuracy : null;
+  const recent = now >= Date.now() - NAV_MAX_FIX_AGE_MS;
+  const reliable = recent && acc != null && acc >= 1 && acc <= NAV_MAX_ACC_M;
 
   // ---------- SPEED (noise-resistant) ----------
   // Preferred: device-reported speed (m/s)
-  let instKts = Number.isFinite(speed) && speed >= 0 ? mpsToKts(speed) : null;
+  let instKts = reliable && Number.isFinite(speed) && speed >= 0 &&
+    mpsToKts(speed) <= NAV_MAX_PLAUSIBLE_KTS ? mpsToKts(speed) : null;
 
   // Fallback: compute from *raw* displacement, gently gated by accuracy
-  if (!Number.isFinite(instKts)) {
-    const dt = lastFix ? Math.max(0.5, (now - lastFix.t) / 1000) : null;
+  if (reliable && !Number.isFinite(instKts)) {
+    const dt = lastFix && lastFix.acc != null && lastFix.acc <= NAV_MAX_ACC_M
+      ? Math.max(0.5, (now - lastFix.t) / 1000) : null;
     const d =
       lastFix != null
         ? geoDistMeters(
@@ -963,89 +1212,92 @@ function onPos(p) {
 
     if (dt && d != null) {
       const minMove = Math.max(SPEED_MIN_MOVE_M, acc * SPEED_ACC_FACTOR);
-      instKts = d >= minMove ? mpsToKts(d / dt) : 0;
+      instKts = d >= minMove ? Math.min(NAV_MAX_PLAUSIBLE_KTS, mpsToKts(d / dt)) : 0;
     } else {
       instKts = 0;
     }
   }
 
   // Smooth speed (EMA)
-  speedEmaVal = spdEma(instKts, speedEmaVal);
+  speedEmaVal = reliable ? spdEma(instKts, speedEmaVal) : null;
 
   // Hysteresis: moving vs stopped
-  if (!moving && speedEmaVal >= MOVING_ENTER_KTS) moving = true;
+  if (!reliable) moving = false;
+  else if (!moving && speedEmaVal >= MOVING_ENTER_KTS) moving = true;
   else if (moving && speedEmaVal <= MOVING_EXIT_KTS) moving = false;
 
   const kts = moving ? Math.max(0, speedEmaVal) : 0;
 
   // ---------- HEADING ----------
-  if (Number.isFinite(heading) && (speed || 0) > 0.5) {
-    gpsHeading = (heading + 360) % 360;
+  if (reliable) {
+    const chosen = chooseHeading(heading, kts, latitude, longitude, acc, now);
+    applyHeadingToUi(chosen);
+  } else {
+    cogAnchor = null;
   }
-  const chosen = chooseHeading(heading, speed, latitude, longitude);
-  applyHeadingToUi(chosen);
 
-  // ---------- POSITION smoothing & boat marker ----------
-  emaLat = posEma(latitude, emaLat);
-  emaLon = posEma(longitude, emaLon);
+  // ---------- POSITION: use the accepted raw fix to avoid lag near hazards ----------
+  plotLat = latitude;
+  plotLon = longitude;
 
   if (mmMap && !mmBoat) {
     mmBoatEl = document.createElement("div");
     mmBoatEl.className = "boat";
-    mmBoatEl.innerHTML = `<svg viewBox="0 0 100 100" width="40" height="40">
+    mmBoatEl.style.width = "36px";
+    mmBoatEl.style.height = "36px";
+    mmBoatEl.innerHTML = `<svg viewBox="-10 -10 120 120" style="width:36px;height:36px">
+               <circle class="boat-ring" cx="50" cy="50" r="55" fill="none" stroke="#70b7dd" stroke-width="3"/>
                <g id="boat-rot">
                  <polygon class="hull" points="50,8 74,60 50,94 26,60" fill="#003b8e" stroke="#ffffff" stroke-width="3"/>
                  <line class="mast" x1="50" y1="20" x2="50" y2="82" stroke="#ffffff" stroke-width="5" stroke-linecap="round"/>
                </g>
+               <circle cx="50" cy="50" r="9" fill="#ffffff" stroke="#003b8e" stroke-width="5"/>
              </svg>`;
     mmBoat = new maplibregl.Marker({ element: mmBoatEl, anchor: "center" })
-      .setLngLat([emaLon, emaLat])
+      .setLngLat([plotLon, plotLat])
       .addTo(mmMap);
-    mmMap.jumpTo({ center: [emaLon, emaLat], zoom: 15 });
+    if (follow) mmMap.jumpTo({ center: [plotLon, plotLat], zoom: 15 });
   } else if (mmBoat) {
-    mmBoat.setLngLat([emaLon, emaLat]);
+    mmBoat.setLngLat([plotLon, plotLat]);
   }
 
-  // ---------- Trail handling (RAW distance + more frequent) ----------
+  // ---------- Trail: collect moving fixes, batch map redraw and storage ----------
   const lastPt = trail.length ? trail[trail.length - 1] : null; // [rawLat, rawLon, t]
   const dtSinceLastPt = lastPt ? (now - lastPt[2]) / 1000 : Infinity;
-  let dRaw = 0;
-  if (lastPt) {
-    dRaw = geoDistMeters(latitude, longitude, lastPt[0], lastPt[1]);
-  }
-
-  const shouldAdd =
-    !lastPt || (dRaw >= TRAIL_MIN_DIST_M && dtSinceLastPt >= TRAIL_MIN_SEC);
-
+  const dRaw = lastPt ? geoDistMeters(latitude, longitude, lastPt[0], lastPt[1]) : 0;
+  const goodTrailFix = reliable && acc <= TRAIL_MAX_ACC_M;
+  const shouldAdd = goodTrailFix &&
+    (!lastPt || (moving && (!trailWasMoving ||
+      (dRaw >= TRAIL_MIN_DIST_M && dtSinceLastPt >= TRAIL_MIN_SEC))));
   if (shouldAdd) {
-    if (lastPt && Number.isFinite(dRaw)) {
-      totalDistM += dRaw; // accumulate true ground distance between raw points
+    if (moving && trailWasMoving && lastPt) {
+      totalDistM += dRaw;
     }
-    // Store RAW coords for trail to avoid lagged-looking track
+    // Store raw coordinates for the trail; only redraw/save periodically.
     trail.push([latitude, longitude, now]);
     if (trail.length > TRAIL_MAX_POINTS)
       trail.splice(0, trail.length - TRAIL_MAX_POINTS);
-    updateTrailSource();
-    saveTrail();
+    queueTrailRedraw();
+    queueTrailSave();
   }
+  trailWasMoving = moving && goodTrailFix;
 
   // ---------- Follow pan (unconditional when ON) ----------
-  if (follow && mmMap && emaLat != null && emaLon != null) {
+  if (follow && mmMap && plotLat != null && plotLon != null) {
     // Always keep centered, no animation lag
-    mmMap.jumpTo({ center: [emaLon, emaLat], zoom: mmMap.getZoom() });
+    mmMap.jumpTo({ center: [plotLon, plotLat], zoom: mmMap.getZoom() });
   }
 
   updateStats({ kts });
-  prevPointForCog = lastFix
-    ? { lat: lastFix.latitude, lon: lastFix.longitude }
-    : null;
-  lastFix = { latitude, longitude, t: now };
-  setGpsStatus(
-    `Fix: ${latitude.toFixed(5)}, ${longitude.toFixed(5)} @ ${fmt(
-      kts,
-      1
-    )} kn (±${Math.round(acc)}m)`
-  );
+  lastFix = { latitude, longitude, t: now, acc,
+    speedMps: Math.min(NAV_MAX_PLAUSIBLE_KTS / 1.94384,
+      reliable && Number.isFinite(speed) && speed >= 0 ? speed : kts / 1.94384) };
+  navFixSuppressed = false;
+  refreshNavStatus();
+  setGpsStatus(reliable
+    ? `Fix: ${latitude.toFixed(5)}, ${longitude.toFixed(5)} @ ${fmt(kts, 1)} kn (±${Math.round(acc)}m)`
+    : `Uncertain GPS position: ${latitude.toFixed(5)}, ${longitude.toFixed(5)} ` +
+      `(${acc == null ? "accuracy unknown" : `±${Math.round(acc)} m`}); yellow boat`);
 }
 
 // Update trail GeoJSON source
@@ -1063,6 +1315,7 @@ function updateTrailSource() {
       },
     ],
   });
+  trailRedrawAt = Date.now();
 }
 
 /* =======================
@@ -1072,25 +1325,30 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") {
     // Force a fresh high-accuracy fix and restart the watch for snappier updates
     GEO.stop();
+    refreshNavStatus();
     forceFreshFix();
     GEO.start(true);
     if (mmMap) mmMap.resize();
     // Reset heading smoothing so the first rotation is crisp
     emaHead = null;
     setGpsStatus("Resumed — refreshing GPS & sensors…");
+  } else {
+    flushTrailSave();
   }
 });
+window.addEventListener("pagehide", flushTrailSave);
 
 // Stale-fix watchdog: if stream stalls, pull a fresh fix (safe even if map not started)
 setInterval(() => {
-  if (document.visibilityState !== "visible") return;
+  if (document.visibilityState !== "visible" || !mapGpsBound || !mmMap) return;
+  refreshNavStatus();
   if (!lastFix) {
     forceFreshFix();
     return;
   }
   const age = Date.now() - lastFix.t;
   if (age > MAX_STALE_MS) forceFreshFix();
-}, 2500);
+}, 1000);
 
 /* =========================================================
    Wire up Marine Map controls (no inline handlers)

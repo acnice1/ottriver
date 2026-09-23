@@ -104,18 +104,19 @@
     .boat svg { width: 40px; height: 40px; }
     */
     
-    /* MapLibre marker is anchored at element center; remove Leaflet-era offsets.
-       Shift up ~17px so the bow tip sits on the coordinate. */
+    /* Marker centre dot is the measured coordinate; the bow shows direction. */
     .boat {
-      width: 40px; height: 40px;
+      width: 36px; height: 36px;
       margin: 0;
       filter: drop-shadow(0 0 3px rgba(0,0,0,.5));
-      transform: translateY(-17px);
       pointer-events: none; /* don't steal map clicks */
     }
-    .boat svg { width: 40px; height: 40px; }
+    .boat svg { width: 36px; height: 36px; }
     .boat .hull { fill: #003b8e; stroke: #ffffff; stroke-width: 3; }
     .boat .mast { stroke: #ffffff; stroke-width: 5; stroke-linecap: round; }
+    .boat.uncertain .hull, .boat.uncertain .mast {
+      stroke: #ffd000; stroke-width: 7;
+    }
 
     /* Collapsed panel shows only header */
     .leaflet-ctrl.collapsed .ctrl-body { display: none; }
@@ -246,7 +247,9 @@
           <label><input type="checkbox" id="mm-courseup"> Course-up</label>
         </div>
 
+        <!-- Detailed GPS warning text paused to keep the map controls compact.
         <div id="mm-gps-status" class="tiny-note" aria-live="polite"></div>
+        -->
 
         <hr>
 
@@ -456,6 +459,6 @@
   </section>
 
   <!-- App JS -->
-  <script type="module" src="app.js"></script>
+  <script type="module" src="app.js?v=20260923-8"></script>
 </body>
 </html>
