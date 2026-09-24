@@ -24,7 +24,8 @@
     /* Base */
     html, body { margin: 0; padding: 0; }
     body { font-family: Arial, sans-serif; background: #f0f0f0; color: #111; }
-    img, iframe { display: block; max-width: 100%; height: auto; border: 0; }
+    img { display: block; max-width: 100%; height: auto; border: 0; }
+    iframe { display: block; max-width: 100%; border: 0; }
     a { color: #003366; text-decoration: none; font-weight: 600; }
     a:hover { text-decoration: underline; }
 
@@ -50,6 +51,31 @@
       max-width: 1000px; margin: 0.75em auto; box-shadow: 0 0 6px rgba(0,0,0,0.1);
     }
     .tab-content.active { display: block; }
+
+    /* Forecast widgets keep their own space and never cover adjacent weather. */
+    #forecast .forecast-layout {
+      display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 340px);
+      align-items: start; gap: 16px;
+    }
+    #forecast .forecast-main, #forecast .forecast-side {
+      display: grid; align-content: start; gap: 16px; min-width: 0;
+    }
+    #forecast .forecast-card {
+      box-sizing: border-box; min-width: 0; padding: 14px;
+      border: 1px solid #d8e2ec; border-radius: 10px; background: #fff;
+    }
+    #forecast .forecast-card h2 { margin: 0 0 12px; font-size: 1.1rem; color: #0a2946; }
+    #forecast .forecast-widget-scroll { min-width: 0; max-width: 100%; overflow-x: auto; }
+    #forecast .forecast-widget-scroll iframe { max-width: none; }
+    #forecast .forecast-sailflow iframe { width: 300px; max-width: none; height: 600px; }
+    #forecast .forecast-weather iframe { width: 296px; max-width: none; height: 191px; }
+    #forecast .forecast-ottawa-weather { min-height: 155px; }
+    #forecast .forecast-ottawa-weather iframe { width: 100%; }
+    #forecast .forecast-weather > a,
+    #forecast .forecast-ottawa-weather > a { display: inline-block; margin-bottom: 8px; }
+    @media (max-width: 760px) {
+      #forecast .forecast-layout { grid-template-columns: minmax(0, 1fr); }
+    }
 
     /* Map Tab */
     #map.tab-content { max-width: none; padding: 0; box-shadow: none; margin: 0; }
@@ -148,7 +174,7 @@
   </header>
 
   <nav aria-label="Primary">
-    <button type="button" class="active" data-tab="forecast" aria-controls="forecast" aria-selected="true">Forecast</button>
+    <button type="button" id="forecast-tab" class="active" data-tab="forecast" aria-controls="forecast" aria-selected="true">Forecast</button>
     <button type="button" data-tab="radar" aria-controls="radar">Radar</button>
     <button type="button" data-tab="map" aria-controls="map">Marine Map</button>
     <button type="button" data-tab="info" aria-controls="info">Info</button>
@@ -156,10 +182,15 @@
   </nav>
 
   <!-- Forecast Tab -->
-  <section id="forecast" class="tab-content active" role="region" aria-labelledby="forecast-tab">
-    <div id="windguru-hooks"></div>
+  <section id="forecast" class="tab-content active" role="region" aria-labelledby="forecast-tab" data-forecast-build="20260924-1">
+    <div class="forecast-layout">
+      <div class="forecast-main">
+        <article class="forecast-card">
+          <h2>Windguru forecast</h2>
+          <div class="forecast-widget-scroll">
+            <div id="windguru-hooks"></div>
 
-    <!-- Windguru widgets (unchanged) -->
+    <!-- Windguru widget settings retained -->
     <script id="wg_fwdg_91822_100_1754791053518">
       (function (window, document) {
         var loader = function () {
@@ -172,6 +203,25 @@
         window.addEventListener ? window.addEventListener("load", loader, false) : window.attachEvent("onload", loader);
       })(window, document);
     </script>
+          </div>
+        </article>
+
+        <article class="forecast-card">
+          <h2>Windy.app forecast</h2>
+          <div class="forecast-widget-scroll">
+            <div
+              data-windywidget="forecast"
+              data-thememode="white"
+              data-spotid="266957"
+              data-appid="4c709ea39265c727b4ae3b9fc34e3ba8">
+            </div>
+            <script async="true" data-cfasync="false" type="text/javascript" src="https://windy.app/widgets-code/forecast/windy_forecast_async.js"></script>
+          </div>
+        </article>
+
+        <article class="forecast-card">
+          <h2>Windguru detailed forecast</h2>
+          <div class="forecast-widget-scroll">
     <script id="wg_fwdg_91822_3_1754791112083">
       (function (window, document) {
         var loader = function () {
@@ -184,7 +234,12 @@
         window.addEventListener ? window.addEventListener("load", loader, false) : window.attachEvent("onload", loader);
       })(window, document);
     </script>
+          </div>
+        </article>
 
+        <article class="forecast-card">
+          <h2>Windfinder forecast</h2>
+          <div class="forecast-widget-scroll">
     <script src="https://www.windfinder.com/widget/forecast/js/nepean-sailing-club_graham-bay?unit_wave=ft&unit_rain=mm&unit_temperature=c&unit_wind=kts&unit_pressure=hPa&days=4&show_day=0&show_waves=0"></script>
     <noscript>
       <a rel="nofollow noopener noreferrer" target="_blank"
@@ -196,14 +251,34 @@
          windfinder.com
       </a>
     </noscript>
+          </div>
+        </article>
+      </div>
 
+      <div class="forecast-side">
+        <article class="forecast-card forecast-sailflow">
+          <h2>SailFlow conditions</h2>
+          <div class="forecast-widget-scroll">
     <iframe
       src="https://widgets.sailflow.com/widgets/web/conditions?spot_id=896&units_wind=kts&units_temp=C&width=300&height=600&color=0A2946&name=Ottawa&activity=Sail&app=sailflow"
-      width="300" height="600" title="Sailflow Conditions"></iframe>
+      width="300" height="600" loading="lazy" title="SailFlow conditions"></iframe>
+          </div>
+        </article>
 
+        <article class="forecast-card forecast-weather">
+          <h2>Environment Canada</h2>
     <a href="https://weather.gc.ca/en/location/index.html?coords=45.403,-75.687" target="_blank" rel="noopener noreferrer">Environment Canada Forecast</a>
-    <iframe title="Environment Canada Weather" width="296" height="191" src="https://weather.gc.ca/wxlink/wxlink.html?coords=45.403%2C-75.687&lang=e"></iframe>
+          <div class="forecast-widget-scroll">
+    <iframe title="Environment Canada weather" width="296" height="191" loading="lazy" src="https://weather.gc.ca/wxlink/wxlink.html?coords=45.403%2C-75.687&lang=e"></iframe>
+          </div>
+        </article>
+
+        <article class="forecast-card forecast-ottawa-weather">
+          <h2>Ottawa weather</h2>
     <a class="weatherwidget-io" href="https://forecast7.com/en/45d42n75d69/ottawa/" data-label_1="OTTAWA" data-label_2="WEATHER" data-theme="pure">OTTAWA WEATHER</a>
+        </article>
+      </div>
+    </div>
   </section>
 
   <!-- Radar Tab -->
