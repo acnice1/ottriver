@@ -71,6 +71,7 @@ const LS_COMPASS_POS = "sailCompassPosition_v1";
 const LS_COMPASS_VISIBLE = "sailCompassVisible_v1";
 const LS_WIND_BEARING = "sailWindBearing_v1";
 const LS_MEASURE_UNIT = "sailMeasureUnit_v1";
+const LS_ROUTE_SPEED = "sailRouteSpeedKts_v1";
 const LS_TRAIL_RECORDING = "sailTrailRecording_v1";
 const LS_TRAIL_VISIBLE = "sailTrailVisible_v1";
 
@@ -435,6 +436,8 @@ let addMarkerActive = false;
 let measureActive = false;
 let measurePoints = [];
 let measureUnit = localStorage.getItem(LS_MEASURE_UNIT) || "nm";
+let routeSpeedKts = parseFloat(localStorage.getItem(LS_ROUTE_SPEED) || "4.5") || 4.5;
+let routeWaypointMarkers = [];
 
 // MapLibre DOM markers we add (keeps API simple)
 let markersLayer = [];
@@ -515,6 +518,14 @@ function setWindBearing(deg, persist = true) {
     if (persist) { try { localStorage.setItem(LS_WIND_BEARING, String(windBearing)); } catch {} }
   }
   updateWindCompassUi();
+  // Wind direction affects every planned leg's point of sail, efficiency colour,
+  // and ETA. Rebuild the route source live so dragging the wind arrow immediately
+  // recolours the map segments as well as refreshing the leg summary.
+  if (typeof updateMeasureSource === "function" && mmMap?.getSource?.("measure")) {
+    updateMeasureSource(false);
+  } else if (typeof updateMeasureUi === "function") {
+    updateMeasureUi();
+  }
 }
 
 function updateWindCompassUi() {
@@ -1374,6 +1385,16 @@ function toggleCourseUp(on) {
   }
 }
 
+function routeBearingDeg(a, b) {
+  const r = Math.PI / 180;
+  const lat1 = a.lat * r, lat2 = b.lat * r;
+  const dLon = (b.lng - a.lng) * r;
+  const y = Math.sin(dLon) * Math.cos(lat2);
+  const x = Math.cos(lat1) * Math.sin(lat2) -
+    Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
+  return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+}
+
 function measureDistanceMeters() {
   let total = 0;
   for (let i = 1; i < measurePoints.length; i++) {
@@ -1390,38 +1411,165 @@ function formatMeasureDistance(meters) {
   return `${(meters / 1852).toFixed(meters >= 185200 ? 1 : 2)} NM`;
 }
 
+function formatRouteDuration(hours) {
+  if (!Number.isFinite(hours) || hours < 0) return "—";
+  const mins = Math.round(hours * 60);
+  if (mins < 60) return `${mins}m`;
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return m ? `${h}h ${m}m` : `${h}h`;
+}
+
+function routeWindAngle(courseDeg) {
+  if (!Number.isFinite(windBearing) || !Number.isFinite(courseDeg)) return null;
+  const d = Math.abs(((courseDeg - windBearing + 540) % 360) - 180);
+  return Math.min(180, d);
+}
+
+function routeSailingProfile(courseDeg) {
+  const angle = routeWindAngle(courseDeg);
+  if (angle == null) return { code: "—", factor: 1, angle: null, tack: false, efficiency: "neutral" };
+  // Approximate effective boat-speed / VMG factors relative to the user-entered
+  // beam-reach speed. This is an estimator, not a Catalina 27 polar model.
+  if (angle < 45) return { code: "CH", factor: 0.55, angle, tack: true, efficiency: "red" };
+  if (angle < 60) return { code: "CH", factor: 0.72, angle, tack: false, efficiency: "yellow" };
+  if (angle < 80) return { code: "CR", factor: 0.90, angle, tack: false, efficiency: "green" };
+  if (angle < 110) return { code: "BER", factor: 1.00, angle, tack: false, efficiency: "green" };
+  if (angle < 150) return { code: "BRR", factor: 0.90, angle, tack: false, efficiency: "green" };
+  return { code: "Run", factor: 0.76, angle, tack: false, efficiency: "yellow" };
+}
+
+function routeEfficiencyColor(efficiency) {
+  if (efficiency === "red") return "#e53935";
+  if (efficiency === "yellow") return "#f5b700";
+  if (efficiency === "green") return "#22a447";
+  return "#ff2aa1"; // no wind set: retain planned-route magenta
+}
+
 function updateMeasureUi() {
+  const totalM = measureDistanceMeters();
   const out = $("#mm-measure-value");
-  if (out) out.textContent = formatMeasureDistance(measureDistanceMeters());
+  if (out) out.textContent = formatMeasureDistance(totalM);
+  const legCount = Math.max(0, measurePoints.length - 1);
+  const countEl = $("#mm-route-count");
+  if (countEl) countEl.textContent = `${legCount} ${legCount === 1 ? "leg" : "legs"}`;
+
+  let totalEtaHours = 0;
+  let etaLegs = 0;
+  for (let i = 1; i < measurePoints.length; i++) {
+    const a = measurePoints[i - 1], b = measurePoints[i];
+    const legNm = geoDistMeters(a.lat, a.lng, b.lat, b.lng) / 1852;
+    const bearing = routeBearingDeg(a, b);
+    const profile = routeSailingProfile(bearing);
+    const effectiveKts = routeSpeedKts * profile.factor;
+    if (effectiveKts > 0) {
+      totalEtaHours += legNm / effectiveKts;
+      etaLegs++;
+    }
+  }
+  const etaEl = $("#mm-route-eta");
+  if (etaEl) {
+    etaEl.textContent = routeSpeedKts > 0 && etaLegs > 0
+      ? `ETA ${formatRouteDuration(totalEtaHours)}${Number.isFinite(windBearing) ? " · wind-adjusted" : ""}`
+      : "ETA —";
+  }
+
   const btn = $("#mm-measure");
   if (btn) {
-    btn.textContent = measureActive ? "Stop measure" : "Start measure";
+    btn.textContent = measureActive ? "Finish route" : (measurePoints.length ? "Edit route" : "Start route");
     btn.classList.toggle("active", measureActive);
     btn.setAttribute("aria-pressed", String(measureActive));
+  }
+  const undo = $("#mm-route-undo");
+  if (undo) undo.disabled = measurePoints.length === 0;
+  const reverse = $("#mm-route-reverse");
+  if (reverse) reverse.disabled = measurePoints.length < 2;
+
+  const legsEl = $("#mm-route-legs");
+  if (legsEl) {
+    legsEl.innerHTML = "";
+    for (let i = 1; i < measurePoints.length; i++) {
+      const a = measurePoints[i - 1], b = measurePoints[i];
+      const meters = geoDistMeters(a.lat, a.lng, b.lat, b.lng);
+      const bearingRaw = routeBearingDeg(a, b);
+      const bearing = Math.round(bearingRaw) % 360;
+      const legNm = meters / 1852;
+      const profile = routeSailingProfile(bearingRaw);
+      const effectiveKts = routeSpeedKts * profile.factor;
+      const eta = effectiveKts > 0 ? formatRouteDuration(legNm / effectiveKts) : "—";
+      const pointText = Number.isFinite(windBearing)
+        ? `${profile.code}${profile.tack ? " · Tack" : ""}`
+        : "—";
+      const div = document.createElement("div");
+      div.className = "route-leg";
+      const efficiencyColor = routeEfficiencyColor(profile.efficiency);
+      div.style.borderLeft = `4px solid ${efficiencyColor}`;
+      div.style.paddingLeft = "8px";
+      div.innerHTML = `<span>${i}→${i + 1}</span><span class="bearing">${String(bearing).padStart(3, "0")}° · ${pointText}</span><span class="distance">${formatMeasureDistance(meters)} · ${eta}</span>`;
+      legsEl.appendChild(div);
+    }
   }
   if (mmMap?.getCanvas?.()) mmMap.getCanvas().style.cursor = measureActive ? "crosshair" : "";
 }
 
-function updateMeasureSource() {
-  if (!mmMap?.getSource?.("measure")) return;
-  const coords = measurePoints.map((p) => [p.lng, p.lat]);
-  const features = [];
-  if (coords.length >= 2) {
-    features.push({
-      type: "Feature",
-      properties: {},
-      geometry: { type: "LineString", coordinates: coords },
+function clearRouteWaypointMarkers() {
+  routeWaypointMarkers.forEach((m) => m.remove());
+  routeWaypointMarkers = [];
+}
+
+function syncRouteWaypointMarkers() {
+  if (!mmMap) return;
+  clearRouteWaypointMarkers();
+  measurePoints.forEach((p, index) => {
+    const el = document.createElement("div");
+    el.className = "route-waypoint";
+    el.textContent = String(index + 1);
+    el.title = `Route waypoint ${index + 1} — drag to move`;
+    el.addEventListener("click", (e) => e.stopPropagation());
+    const marker = new maplibregl.Marker({ element: el, draggable: true, anchor: "center" })
+      .setLngLat([p.lng, p.lat])
+      .addTo(mmMap);
+    marker.on("drag", () => {
+      const ll = marker.getLngLat();
+      measurePoints[index] = { lat: ll.lat, lng: ll.lng };
+      updateMeasureSource(false);
     });
-  }
-  for (const c of coords) {
+    marker.on("dragend", () => {
+      const ll = marker.getLngLat();
+      measurePoints[index] = { lat: ll.lat, lng: ll.lng };
+      updateMeasureSource(false);
+    });
+    routeWaypointMarkers.push(marker);
+  });
+}
+
+function updateMeasureSource(syncMarkers = true) {
+  if (!mmMap?.getSource?.("measure")) return;
+  const features = [];
+  // Each route leg is its own feature so MapLibre can colour it by sailing efficiency.
+  for (let i = 1; i < measurePoints.length; i++) {
+    const a = measurePoints[i - 1];
+    const b = measurePoints[i];
+    const bearing = routeBearingDeg(a, b);
+    const profile = routeSailingProfile(bearing);
     features.push({
       type: "Feature",
-      properties: {},
-      geometry: { type: "Point", coordinates: c },
+      properties: {
+        leg: i,
+        efficiency: profile.efficiency,
+        pointOfSail: profile.code,
+        tack: profile.tack ? 1 : 0,
+      },
+      geometry: {
+        type: "LineString",
+        coordinates: [[a.lng, a.lat], [b.lng, b.lat]],
+      },
     });
   }
   mmMap.getSource("measure").setData({ type: "FeatureCollection", features });
+  if (syncMarkers) syncRouteWaypointMarkers();
   updateMeasureUi();
+  raiseMeasurementLayers();
 }
 
 function setMeasureActive(active) {
@@ -1436,6 +1584,19 @@ function setMeasureActive(active) {
 
 function clearMeasurement() {
   measurePoints = [];
+  clearRouteWaypointMarkers();
+  updateMeasureSource(false);
+}
+
+function undoRoutePoint() {
+  if (!measurePoints.length) return;
+  measurePoints.pop();
+  updateMeasureSource();
+}
+
+function reverseRoute() {
+  if (measurePoints.length < 2) return;
+  measurePoints.reverse();
   updateMeasureSource();
 }
 
@@ -1579,7 +1740,14 @@ function initMarineMapOnce() {
       source: "measure",
       filter: ["==", ["geometry-type"], "LineString"],
       paint: {
-        "line-color": "#ff2aa1",
+        "line-color": [
+          "match",
+          ["get", "efficiency"],
+          "red", "#e53935",
+          "yellow", "#f5b700",
+          "green", "#22a447",
+          "#ff2aa1"
+        ],
         "line-width": 5,
         "line-opacity": 1,
         "line-dasharray": [1.7, 1.05],
@@ -1927,7 +2095,21 @@ function wireControls() {
       updateMeasureUi();
     });
   }
+  const routeSpeedInput = $("#mm-route-speed");
+  if (routeSpeedInput) {
+    routeSpeedKts = Math.min(15, Math.max(0.5, Number(routeSpeedKts) || 4.5));
+    routeSpeedInput.value = routeSpeedKts.toFixed(1);
+    routeSpeedInput.addEventListener("input", (e) => {
+      const v = Number(e.target.value);
+      if (!Number.isFinite(v) || v <= 0) return;
+      routeSpeedKts = Math.min(15, Math.max(0.5, v));
+      try { localStorage.setItem(LS_ROUTE_SPEED, String(routeSpeedKts)); } catch {}
+      updateMeasureUi();
+    });
+  }
   $("#mm-measure")?.addEventListener("click", () => setMeasureActive(!measureActive));
+  $("#mm-route-undo")?.addEventListener("click", undoRoutePoint);
+  $("#mm-route-reverse")?.addEventListener("click", reverseRoute);
   $("#mm-measure-clear")?.addEventListener("click", clearMeasurement);
   updateMeasureUi();
 
