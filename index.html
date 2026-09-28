@@ -490,7 +490,10 @@
     }
     .floating-compass-close:hover { background: rgba(255,255,255,.16); }
     .floating-compass-body { padding: 8px 10px 10px; text-align: center; }
-    .detailed-compass-dial { width: 150px; height: 150px; margin: 0 auto 4px; display: block; }
+    .detailed-compass-dial {
+      width: 150px; height: 150px; margin: 0 auto 4px; display: block;
+      cursor: crosshair; user-select: none; -webkit-user-select: none; touch-action: none;
+    }
     .detailed-compass-face { fill: rgba(255,255,255,.96); stroke: rgba(255,255,255,.35); stroke-width: 2; }
     .detailed-compass-tick { stroke: #48647c; stroke-width: 1.1; }
     .detailed-compass-tick.major { stroke: #0a2946; stroke-width: 2; }
@@ -502,6 +505,18 @@
     .compass-readout .degrees { font-size: 1.35rem; font-weight: 800; font-variant-numeric: tabular-nums; }
     .compass-readout .point { font-size: .82rem; font-weight: 700; color: #8edaf2; }
     .compass-source { margin-top: 1px; font-size: .66rem; letter-spacing: .09em; text-transform: uppercase; color: rgba(255,255,255,.58); }
+    .detailed-compass-wind { transform-origin: 75px 75px; pointer-events: none; }
+    .wind-marker-line { stroke: #14a874; stroke-width: 3.5; stroke-linecap: round; filter: drop-shadow(0 1px 1px rgba(0,0,0,.35)); }
+    .wind-marker-tip { fill: #14a874; stroke: #ffffff; stroke-width: 1.5; }
+    .wind-control { margin-top: 7px; padding-top: 7px; border-top: 1px solid rgba(255,255,255,.10); }
+    .wind-readout { display:flex; justify-content:center; gap:5px; align-items:baseline; margin-bottom:5px; font-size:.72rem; color:rgba(255,255,255,.72); }
+    .wind-readout strong { color:#64e0b5; font-size:.78rem; letter-spacing:.02em; }
+    .wind-input-row { display:grid; grid-template-columns:1fr auto; gap:5px; }
+    .wind-bearing-input { width:100%; box-sizing:border-box; padding:5px 7px; border-radius:7px; border:1px solid rgba(255,255,255,.16); background:rgba(255,255,255,.08); color:#fff; font:inherit; font-size:.75rem; }
+    .wind-bearing-input:focus { outline:2px solid rgba(100,224,181,.42); outline-offset:1px; }
+    .wind-clear-btn { padding:5px 8px; border-radius:7px; border:1px solid rgba(255,255,255,.12); background:rgba(255,255,255,.08); color:#fff; cursor:pointer; font-size:.72rem; }
+    .wind-clear-btn:hover { background:rgba(255,255,255,.14); }
+    .wind-hint { margin-top:4px; font-size:.60rem; color:rgba(255,255,255,.46); }
 
     /* Compass */
     .compass { position: relative; width: 28px; height: 28px; border-radius: 50%; background: #fff; border: 2px solid #d0d7de; }
@@ -579,8 +594,7 @@
       <div class="brand">
         <div class="brand-mark" aria-hidden="true">⛵</div>
         <div class="brand-copy">
-          <span class="eyebrow">Ottawa River</span>
-          <h1>Ottawa Sail Navigator</h1>
+          <h1>Ottawa Sail Nav</h1>
         </div>
       </div>
       <nav aria-label="Primary">
@@ -720,6 +734,10 @@
           <circle class="detailed-compass-face" cx="75" cy="75" r="71"></circle>
           <g id="mm-compass-ticks"></g>
           <g id="mm-compass-labels"></g>
+          <g class="detailed-compass-wind" id="mm-wind-marker" style="display:none">
+            <line class="wind-marker-line" x1="75" y1="18" x2="75" y2="45"></line>
+            <polygon class="wind-marker-tip" points="75,49 69,39 81,39"></polygon>
+          </g>
           <g class="detailed-compass-needle" id="mm-detailed-needle">
             <polygon points="75,18 69,76 75,70 81,76" fill="#d52828"></polygon>
             <polygon points="75,132 69,74 75,80 81,74" fill="#425a70"></polygon>
@@ -731,6 +749,14 @@
           <span class="point" id="mm-compass-point">—</span>
         </div>
         <div class="compass-source" id="mm-compass-source">waiting for heading</div>
+        <div class="wind-control">
+          <div class="wind-readout"><span>Wind from</span><strong id="mm-wind-readout">not set</strong></div>
+          <div class="wind-input-row">
+            <input id="mm-wind-bearing" class="wind-bearing-input" type="number" min="0" max="359" step="1" inputmode="numeric" placeholder="Bearing 0–359°" aria-label="Wind direction from bearing in degrees">
+            <button id="mm-wind-clear" class="wind-clear-btn" type="button">Clear</button>
+          </div>
+          <div class="wind-hint">Tap the compass face to set wind direction.</div>
+        </div>
       </div>
     </div>
 

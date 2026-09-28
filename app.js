@@ -69,6 +69,7 @@ const LS_MARKERS = "sailMarkers_v1";
 const LS_CHART_OPACITY = "sailChartOpacity_v1";
 const LS_COMPASS_POS = "sailCompassPosition_v1";
 const LS_COMPASS_VISIBLE = "sailCompassVisible_v1";
+const LS_WIND_BEARING = "sailWindBearing_v1";
 const LS_MEASURE_UNIT = "sailMeasureUnit_v1";
 const LS_TRAIL_RECORDING = "sailTrailRecording_v1";
 const LS_TRAIL_VISIBLE = "sailTrailVisible_v1";
@@ -81,6 +82,10 @@ const spdEma = makeEma(SPD_EMA_ALPHA);
 /* ===== Speed smoothing & stationary detection ===== */
 let speedEmaVal = null;
 let moving = false;
+let windBearing = (() => {
+  const v = parseFloat(localStorage.getItem(LS_WIND_BEARING) || "");
+  return Number.isFinite(v) ? ((v % 360) + 360) % 360 : null;
+})();
 
 /* =========================================================
    CSS offset for floating map panel
@@ -501,6 +506,36 @@ function compassPoint(deg) {
   return points[Math.round((((deg % 360) + 360) % 360) / 22.5) % 16];
 }
 
+function setWindBearing(deg, persist = true) {
+  if (deg == null || deg === "" || !Number.isFinite(Number(deg))) {
+    windBearing = null;
+    if (persist) { try { localStorage.removeItem(LS_WIND_BEARING); } catch {} }
+  } else {
+    windBearing = ((Number(deg) % 360) + 360) % 360;
+    if (persist) { try { localStorage.setItem(LS_WIND_BEARING, String(windBearing)); } catch {} }
+  }
+  updateWindCompassUi();
+}
+
+function updateWindCompassUi() {
+  const marker = $("#mm-wind-marker");
+  const readout = $("#mm-wind-readout");
+  const input = $("#mm-wind-bearing");
+  if (Number.isFinite(windBearing)) {
+    const w = ((windBearing % 360) + 360) % 360;
+    if (marker) {
+      marker.style.display = "";
+      marker.style.transform = `rotate(${w}deg)`;
+    }
+    if (readout) readout.textContent = `${Math.round(w).toString().padStart(3, "0")}° ${compassPoint(w)}`;
+    if (input && document.activeElement !== input) input.value = String(Math.round(w));
+  } else {
+    if (marker) marker.style.display = "none";
+    if (readout) readout.textContent = "not set";
+    if (input && document.activeElement !== input) input.value = "";
+  }
+}
+
 function updateDetailedCompass(deg) {
   if (!Number.isFinite(deg)) return;
   const h = ((deg % 360) + 360) % 360;
@@ -521,6 +556,9 @@ function setupFloatingCompass() {
   const showBtn = $("#mm-show-compass");
   const ticks = $("#mm-compass-ticks");
   const labels = $("#mm-compass-labels");
+  const compassSvg = $("#mm-compass-svg");
+  const windInput = $("#mm-wind-bearing");
+  const windClear = $("#mm-wind-clear");
   if (!panel || !dragHandle) return;
 
   const svgNS = "http://www.w3.org/2000/svg";
@@ -564,6 +602,76 @@ function setupFloatingCompass() {
       labels.appendChild(t);
     }
   }
+
+  const bearingFromPointer = (e) => {
+    if (!compassSvg) return null;
+    const rect = compassSvg.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    const dx = e.clientX - cx;
+    const dy = e.clientY - cy;
+    if (Math.hypot(dx, dy) < rect.width * 0.16) return null;
+    return (Math.atan2(dx, -dy) * 180 / Math.PI + 360) % 360;
+  };
+  // Wind bearing can be set by tapping/clicking or by dragging continuously
+  // around the compass rose. Pointer Events cover mouse, touch, and pen.
+  let windDragPointerId = null;
+  let windDragBearing = null;
+
+  const updateWindFromPointer = (e, persist = false) => {
+    const bearing = bearingFromPointer(e);
+    if (!Number.isFinite(bearing)) return;
+    windDragBearing = bearing;
+    setWindBearing(Math.round(bearing), persist);
+  };
+
+  compassSvg?.addEventListener("pointerdown", (e) => {
+    // Primary button only for mouse; touch/pen report button 0 as well.
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    windDragPointerId = e.pointerId;
+    windDragBearing = null;
+    compassSvg.setPointerCapture?.(e.pointerId);
+    updateWindFromPointer(e, false);
+    e.preventDefault();
+  });
+
+  compassSvg?.addEventListener("pointermove", (e) => {
+    if (windDragPointerId !== e.pointerId) return;
+    updateWindFromPointer(e, false);
+    e.preventDefault();
+  });
+
+  const finishWindDrag = (e) => {
+    if (windDragPointerId !== e.pointerId) return;
+    updateWindFromPointer(e, false);
+    try { compassSvg.releasePointerCapture?.(e.pointerId); } catch {}
+    windDragPointerId = null;
+    if (Number.isFinite(windDragBearing)) {
+      // Persist only once at the end of the gesture.
+      setWindBearing(Math.round(windDragBearing), true);
+    }
+    windDragBearing = null;
+    e.preventDefault();
+  };
+
+  compassSvg?.addEventListener("pointerup", finishWindDrag);
+  compassSvg?.addEventListener("pointercancel", (e) => {
+    if (windDragPointerId !== e.pointerId) return;
+    try { compassSvg.releasePointerCapture?.(e.pointerId); } catch {}
+    windDragPointerId = null;
+    if (Number.isFinite(windDragBearing)) setWindBearing(Math.round(windDragBearing), true);
+    windDragBearing = null;
+  });
+  windInput?.addEventListener("change", (e) => {
+    const n = Number(e.target.value);
+    if (Number.isFinite(n)) setWindBearing(n);
+    else setWindBearing(null);
+  });
+  windInput?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") e.target.blur();
+  });
+  windClear?.addEventListener("click", () => setWindBearing(null));
+  updateWindCompassUi();
 
   const syncCompassToggleLabel = () => {
     if (!showBtn) return;
