@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Ottawa Sailing Dashboard</title>
+  <title>Ottawa Sail Navigator</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="theme-color" content="#005599" />
   <link rel="manifest" href="manifest.json" />
@@ -19,36 +19,147 @@
   <script src="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js"></script>
 
   <style>
-    :root { --topbar-h: 0px; } /* JS sets this to header+nav total height */
+    :root {
+      --topbar-h: 0px; /* JS sets this to header+nav total height */
+      --bg: #edf3f8;
+      --surface: #ffffff;
+      --surface-soft: rgba(255,255,255,0.84);
+      --text: #14283d;
+      --muted: #5f7286;
+      --line: rgba(14, 41, 66, 0.10);
+      --brand: #0a2946;
+      --brand-2: #1369a5;
+      --brand-3: #1da4d4;
+      --shadow-soft: 0 10px 34px rgba(18, 39, 63, 0.08);
+      --shadow-card: 0 8px 24px rgba(10, 35, 61, 0.08);
+    }
 
     /* Base */
     html, body { margin: 0; padding: 0; }
-    body { font-family: Arial, sans-serif; background: #f0f0f0; color: #111; }
+    body {
+      font-family: Inter, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background:
+        radial-gradient(circle at top left, rgba(29,164,212,.10), transparent 34%),
+        linear-gradient(180deg, #f5f9fc 0%, var(--bg) 100%);
+      color: var(--text);
+    }
     img { display: block; max-width: 100%; height: auto; border: 0; }
     iframe { display: block; max-width: 100%; border: 0; }
-    a { color: #003366; text-decoration: none; font-weight: 600; }
+    a { color: #0e4f7a; text-decoration: none; font-weight: 600; }
     a:hover { text-decoration: underline; }
 
-    /* Top bar */
-    header { background: #003366; color: #fff; text-align: center; padding: 1em; }
+    /* Compact modern top bar */
+    header, nav {
+      position: sticky;
+      top: 0;
+      z-index: 5001;
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+    }
+    header {
+      background: linear-gradient(135deg, rgba(8, 26, 47, 0.94), rgba(14, 61, 101, 0.92));
+      color: #fff;
+      padding: 0.38rem 0.9rem;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+    }
+    .topbar-inner {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+    }
+    .brand-mark {
+      width: 30px;
+      height: 30px;
+      border-radius: 10px;
+      display: grid;
+      place-items: center;
+      background: linear-gradient(135deg, rgba(29,164,212,.95), rgba(19,105,165,.95));
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.35), 0 6px 16px rgba(3, 20, 37, .25);
+      font-size: 15px;
+      flex: 0 0 auto;
+    }
+    .brand-copy {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      line-height: 1.05;
+    }
+    .brand-copy .eyebrow {
+      font-size: 0.66rem;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: rgba(255,255,255,.65);
+    }
+    header h1 {
+      margin: 0;
+      font-size: 1.04rem;
+      font-weight: 700;
+      letter-spacing: 0.01em;
+      white-space: nowrap;
+    }
+    .header-meta {
+      font-size: 0.78rem;
+      color: rgba(255,255,255,.72);
+      white-space: nowrap;
+    }
     nav {
-      display: flex; justify-content: center; gap: 0;
-      background: #005599; overflow-x: auto; white-space: nowrap;
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+      padding: 0.45rem 0.75rem 0.55rem;
+      background: rgba(10, 34, 59, 0.86);
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+      overflow-x: auto;
+      white-space: nowrap;
+      box-shadow: 0 10px 20px rgba(10, 35, 61, 0.08);
     }
-    /* Make header + nav always clickable above everything */
-    header, nav { position: sticky; top: 0; z-index: 5001; }
-
     nav button {
-      appearance: none; background: none; border: 0; color: #fff;
-      padding: 1em 1.2em; font-size: 1rem; cursor: pointer; flex: 0 0 auto;
+      appearance: none;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.08);
+      color: rgba(255,255,255,0.78);
+      padding: 0.5rem 0.85rem;
+      font-size: 0.88rem;
+      font-weight: 600;
+      cursor: pointer;
+      flex: 0 0 auto;
+      border-radius: 999px;
+      transition: background-color .18s ease, border-color .18s ease, transform .18s ease, color .18s ease, box-shadow .18s ease;
     }
-    nav button:hover, nav button.active { background: #0077aa; }
-    nav button:focus-visible { outline: 2px solid #fff; outline-offset: -2px; }
+    nav button:hover {
+      transform: translateY(-1px);
+      background: rgba(255,255,255,0.10);
+      border-color: rgba(255,255,255,0.16);
+      color: #fff;
+    }
+    nav button.active {
+      background: linear-gradient(135deg, rgba(29,164,212,0.24), rgba(19,105,165,0.38));
+      color: #fff;
+      border-color: rgba(120, 214, 244, 0.45);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.10), 0 8px 18px rgba(7, 24, 42, .22);
+    }
+    nav button:focus-visible { outline: 2px solid rgba(255,255,255,0.82); outline-offset: 2px; }
 
     /* Tabs */
     .tab-content {
-      display: none; padding: 1em; background: #fff;
-      max-width: 1000px; margin: 0.75em auto; box-shadow: 0 0 6px rgba(0,0,0,0.1);
+      display: none;
+      padding: 1rem;
+      background: rgba(255,255,255,0.88);
+      max-width: 1040px;
+      margin: 0.85rem auto;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      box-shadow: var(--shadow-soft);
     }
     .tab-content.active { display: block; }
 
@@ -163,25 +274,42 @@
     .collapsible-content { display: none; padding: 1em; background: #fff; }
 
     /* Mobile tweaks */
+    @media (max-width: 760px) {
+      .topbar-inner { align-items: flex-start; flex-direction: column; }
+      .header-meta { font-size: 0.72rem; }
+    }
     @media (max-width: 600px) {
-      header { font-size: 1rem; }
-      nav button { font-size: .95rem; padding: .75em 1em; }
-      .tab-content { padding: .8em; margin: .5em auto; }
+      header { padding: 0.34rem 0.75rem; }
+      .brand-mark { width: 28px; height: 28px; border-radius: 9px; }
+      header h1 { font-size: 0.95rem; }
+      .brand-copy .eyebrow { font-size: 0.62rem; }
+      nav { justify-content: flex-start; padding: 0.42rem 0.55rem 0.5rem; gap: 6px; }
+      nav button { font-size: 0.82rem; padding: 0.48rem 0.75rem; }
+      .tab-content { padding: .8em; margin: .5em auto; border-radius: 14px; }
     }
   </style>
 </head>
 <body>
 
   <header>
-    <h1>Ottawa River Sailing Dashboard</h1>
+    <div class="topbar-inner">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">⛵</div>
+        <div class="brand-copy">
+          <span class="eyebrow">Ottawa River</span>
+          <h1>Ottawa Sail Navigator</h1>
+        </div>
+      </div>
+      <div class="header-meta">Forecast • Charts • GPS</div>
+    </div>
   </header>
 
   <nav aria-label="Primary">
-    <button type="button" id="forecast-tab" class="active" data-tab="forecast" aria-controls="forecast" aria-selected="true">Forecast</button>
+    <button type="button" id="forecast-tab" class="active" data-tab="forecast" aria-controls="forecast" aria-selected="true">Weather</button>
     <button type="button" data-tab="radar" aria-controls="radar">Radar</button>
-    <button type="button" data-tab="map" aria-controls="map">Marine Map</button>
-    <button type="button" data-tab="info" aria-controls="info">Info</button>
-    <button type="button" data-tab="emergency" aria-controls="emergency">Emergency</button>
+    <button type="button" data-tab="map" aria-controls="map">Charts</button>
+    <button type="button" data-tab="info" aria-controls="info">Reference</button>
+    <button type="button" data-tab="emergency" aria-controls="emergency">Safety</button>
   </nav>
 
   <!-- Forecast Tab -->
