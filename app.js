@@ -64,6 +64,8 @@ const LS_POINTS = "sailTrailPoints_v1";
 const LS_DIST = "sailTrailDistM_v1";
 const LS_MARKERS = "sailMarkers_v1";
 const LS_CHART_OPACITY = "sailChartOpacity_v1";
+const LS_COMPASS_POS = "sailCompassPosition_v1";
+const LS_COMPASS_VISIBLE = "sailCompassVisible_v1";
 
 /* ===== EMA helpers (explicit position & speed EMAs) ===== */
 const makeEma = (alpha) => (current, prev) =>
@@ -82,7 +84,8 @@ function adjustPanelOffset() {
   const nav = document.querySelector("nav");
   const headerH = header ? header.offsetHeight : 0;
   const navH = nav ? nav.offsetHeight : 0;
-  const topbarH = headerH + navH;
+  // Nav now sits inside the header app bar; avoid counting its height twice.
+  const topbarH = header && nav && header.contains(nav) ? headerH : headerH + navH;
   document.documentElement.style.setProperty("--nav-h", `${navH}px`);
   document.documentElement.style.setProperty("--topbar-h", `${topbarH}px`);
 }
@@ -479,6 +482,142 @@ function rotateCompass(deg) {
   if (n) n.style.transform = `translate(-50%,-90%) rotate(${deg}deg)`;
 }
 
+function compassPoint(deg) {
+  if (!Number.isFinite(deg)) return "—";
+  const points = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"];
+  return points[Math.round((((deg % 360) + 360) % 360) / 22.5) % 16];
+}
+
+function updateDetailedCompass(deg) {
+  if (!Number.isFinite(deg)) return;
+  const h = ((deg % 360) + 360) % 360;
+  const needle = $("#mm-detailed-needle");
+  const degrees = $("#mm-compass-degrees");
+  const point = $("#mm-compass-point");
+  const source = $("#mm-compass-source");
+  if (needle) needle.style.transform = `rotate(${h}deg)`;
+  if (degrees) degrees.textContent = `${Math.round(h).toString().padStart(3, "0")}°`;
+  if (point) point.textContent = compassPoint(h);
+  if (source) source.textContent = moving ? "course over ground" : "device compass";
+}
+
+function setupFloatingCompass() {
+  const panel = $("#mm-detailed-compass");
+  const dragHandle = $("#mm-compass-drag");
+  const hideBtn = $("#mm-compass-hide");
+  const showBtn = $("#mm-show-compass");
+  const ticks = $("#mm-compass-ticks");
+  const labels = $("#mm-compass-labels");
+  if (!panel || !dragHandle) return;
+
+  const svgNS = "http://www.w3.org/2000/svg";
+  if (ticks && !ticks.childNodes.length) {
+    for (let deg = 0; deg < 360; deg += 10) {
+      const major = deg % 30 === 0;
+      const line = document.createElementNS(svgNS, "line");
+      line.setAttribute("x1", "75");
+      line.setAttribute("y1", major ? "8" : "11");
+      line.setAttribute("x2", "75");
+      line.setAttribute("y2", major ? "18" : "16");
+      line.setAttribute("class", `detailed-compass-tick${major ? " major" : ""}`);
+      line.setAttribute("transform", `rotate(${deg} 75 75)`);
+      ticks.appendChild(line);
+    }
+  }
+  if (labels && !labels.childNodes.length) {
+    const dirs = [
+      [0, "N", "north"], [45, "NE", ""], [90, "E", ""], [135, "SE", ""],
+      [180, "S", ""], [225, "SW", ""], [270, "W", ""], [315, "NW", ""]
+    ];
+    for (const [deg, label, extra] of dirs) {
+      const r = 49;
+      const a = (deg - 90) * Math.PI / 180;
+      const t = document.createElementNS(svgNS, "text");
+      t.setAttribute("x", String(75 + Math.cos(a) * r));
+      t.setAttribute("y", String(75 + Math.sin(a) * r));
+      t.setAttribute("class", `detailed-compass-cardinal${extra ? ` ${extra}` : ""}`);
+      t.textContent = label;
+      labels.appendChild(t);
+    }
+    for (let deg = 30; deg < 360; deg += 30) {
+      if (deg % 90 === 0) continue;
+      const r = 62;
+      const a = (deg - 90) * Math.PI / 180;
+      const t = document.createElementNS(svgNS, "text");
+      t.setAttribute("x", String(75 + Math.cos(a) * r));
+      t.setAttribute("y", String(75 + Math.sin(a) * r));
+      t.setAttribute("class", "detailed-compass-label");
+      t.textContent = String(deg);
+      labels.appendChild(t);
+    }
+  }
+
+  const syncCompassToggleLabel = () => {
+    if (!showBtn) return;
+    const hidden = panel.classList.contains("hidden");
+    showBtn.textContent = hidden ? "Show compass" : "Hide compass";
+    showBtn.setAttribute("aria-pressed", hidden ? "false" : "true");
+  };
+
+  try {
+    const saved = JSON.parse(localStorage.getItem(LS_COMPASS_POS) || "null");
+    if (saved && Number.isFinite(saved.left) && Number.isFinite(saved.top)) {
+      panel.style.left = `${saved.left}px`;
+      panel.style.top = `${saved.top}px`;
+    }
+    if (localStorage.getItem(LS_COMPASS_VISIBLE) === "0") panel.classList.add("hidden");
+  } catch {}
+  syncCompassToggleLabel();
+
+  const clampToViewport = () => {
+    const rect = panel.getBoundingClientRect();
+    const minTop = Math.max(6, parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--topbar-h")) || 0);
+    const left = Math.min(Math.max(6, rect.left), Math.max(6, window.innerWidth - rect.width - 6));
+    const top = Math.min(Math.max(minTop + 6, rect.top), Math.max(minTop + 6, window.innerHeight - rect.height - 6));
+    panel.style.left = `${left}px`;
+    panel.style.top = `${top}px`;
+    try { localStorage.setItem(LS_COMPASS_POS, JSON.stringify({ left, top })); } catch {}
+  };
+
+  let drag = null;
+  dragHandle.addEventListener("pointerdown", (e) => {
+    if (e.target instanceof Element && e.target.closest("button")) return;
+    const rect = panel.getBoundingClientRect();
+    drag = { dx: e.clientX - rect.left, dy: e.clientY - rect.top, id: e.pointerId };
+    dragHandle.setPointerCapture?.(e.pointerId);
+    e.preventDefault();
+  });
+  dragHandle.addEventListener("pointermove", (e) => {
+    if (!drag || e.pointerId !== drag.id) return;
+    panel.style.left = `${e.clientX - drag.dx}px`;
+    panel.style.top = `${e.clientY - drag.dy}px`;
+  });
+  const finishDrag = (e) => {
+    if (!drag || (e.pointerId != null && e.pointerId !== drag.id)) return;
+    drag = null;
+    clampToViewport();
+  };
+  dragHandle.addEventListener("pointerup", finishDrag);
+  dragHandle.addEventListener("pointercancel", finishDrag);
+
+  const setCompassVisible = (visible) => {
+    panel.classList.toggle("hidden", !visible);
+    try { localStorage.setItem(LS_COMPASS_VISIBLE, visible ? "1" : "0"); } catch {}
+    syncCompassToggleLabel();
+    if (visible) requestAnimationFrame(clampToViewport);
+  };
+
+  hideBtn?.addEventListener("click", () => setCompassVisible(false));
+  showBtn?.addEventListener("click", () => {
+    setCompassVisible(panel.classList.contains("hidden"));
+  });
+  window.addEventListener("resize", () => {
+    if (!panel.classList.contains("hidden")) clampToViewport();
+  });
+
+  updateDetailedCompass(emaHead);
+}
+
 let mmBoatEl = null; // DOM element inside MapLibre Marker
 
 function updateCourseUpBearing(force = false) {
@@ -510,8 +649,9 @@ function applyHeadingToUi(deg) {
   const h = ((deg % 360) + 360) % 360;
   // Smooth and store
   emaHead = smoothAngle(emaHead, h, HEADING_SMOOTH_ALPHA);
-  // Rotate compass needle
+  // Rotate compass needle and update the detailed floating compass.
   rotateCompass(emaHead || 0);
+  updateDetailedCompass(emaHead || 0);
 
   // When course-up is ON: rotate the MAP, keep boat upright.
   // When OFF: keep map north-up, rotate the boat icon.
@@ -1102,13 +1242,14 @@ function initMarineMapOnce() {
     zoom: 12,
     bearing: 0,
     pitch: 0,
+    attributionControl: false, // use the single compact control added below
   });
   // The large map warning panel is paused at the user's request.
   // ensureNavAlert();
 
   mmMap.addControl(
     new maplibregl.NavigationControl({ visualizePitch: true }),
-    "top-right"
+    "top-left"
   );
   mmMap.addControl(
     new maplibregl.AttributionControl({ compact: true }),
@@ -1389,6 +1530,8 @@ setInterval(() => {
 function wireControls() {
   $("#mm-startgps")?.addEventListener("click", startGpsForMap);
   $("#mm-recenter")?.addEventListener("click", recenterToBoat);
+
+  setupFloatingCompass();
 
   const chartOpacitySlider = $("#mm-chart-opacity");
   if (chartOpacitySlider) {

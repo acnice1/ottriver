@@ -48,105 +48,108 @@
     a { color: #0e4f7a; text-decoration: none; font-weight: 600; }
     a:hover { text-decoration: underline; }
 
-    /* Compact modern top bar */
-    header, nav {
+    /* Ultra-compact single-row app bar */
+    header {
       position: sticky;
       top: 0;
       z-index: 5001;
+      color: #fff;
+      background: linear-gradient(135deg, rgba(8, 26, 47, 0.96), rgba(14, 61, 101, 0.94));
+      border-bottom: 1px solid rgba(255,255,255,0.09);
+      box-shadow: 0 8px 22px rgba(7, 24, 42, .14);
       backdrop-filter: blur(12px);
       -webkit-backdrop-filter: blur(12px);
     }
-    header {
-      background: linear-gradient(135deg, rgba(8, 26, 47, 0.94), rgba(14, 61, 101, 0.92));
-      color: #fff;
-      padding: 0.38rem 0.9rem;
-      border-bottom: 1px solid rgba(255,255,255,0.08);
-    }
     .topbar-inner {
-      max-width: 1200px;
+      max-width: 1400px;
       margin: 0 auto;
+      min-height: 44px;
+      padding: 0.28rem 0.65rem;
       display: flex;
       align-items: center;
-      justify-content: space-between;
       gap: 12px;
     }
     .brand {
       display: flex;
       align-items: center;
-      gap: 10px;
-      min-width: 0;
+      gap: 8px;
+      min-width: max-content;
+      flex: 0 0 auto;
     }
     .brand-mark {
-      width: 30px;
-      height: 30px;
-      border-radius: 10px;
+      width: 28px;
+      height: 28px;
+      border-radius: 9px;
       display: grid;
       place-items: center;
       background: linear-gradient(135deg, rgba(29,164,212,.95), rgba(19,105,165,.95));
-      box-shadow: inset 0 1px 0 rgba(255,255,255,.35), 0 6px 16px rgba(3, 20, 37, .25);
-      font-size: 15px;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.30), 0 5px 14px rgba(3, 20, 37, .22);
+      font-size: 14px;
       flex: 0 0 auto;
     }
     .brand-copy {
       display: flex;
-      flex-direction: column;
+      align-items: baseline;
+      gap: 7px;
       min-width: 0;
-      line-height: 1.05;
+      white-space: nowrap;
     }
     .brand-copy .eyebrow {
-      font-size: 0.66rem;
-      font-weight: 700;
-      letter-spacing: 0.14em;
+      font-size: 0.62rem;
+      font-weight: 750;
+      letter-spacing: 0.11em;
       text-transform: uppercase;
-      color: rgba(255,255,255,.65);
+      color: rgba(255,255,255,.52);
     }
     header h1 {
       margin: 0;
-      font-size: 1.04rem;
-      font-weight: 700;
-      letter-spacing: 0.01em;
+      font-size: 0.96rem;
+      font-weight: 720;
+      letter-spacing: 0.005em;
       white-space: nowrap;
     }
-    .header-meta {
-      font-size: 0.78rem;
-      color: rgba(255,255,255,.72);
-      white-space: nowrap;
-    }
-    nav {
+    .header-meta { display: none; }
+    header nav {
       display: flex;
-      justify-content: center;
-      gap: 8px;
-      padding: 0.45rem 0.75rem 0.55rem;
-      background: rgba(10, 34, 59, 0.86);
-      border-bottom: 1px solid rgba(255,255,255,0.08);
+      align-items: center;
+      justify-content: flex-start;
+      gap: 5px;
+      min-width: 0;
+      flex: 1 1 auto;
+      padding: 0;
+      margin: 0;
+      background: transparent;
+      border: 0;
       overflow-x: auto;
+      overflow-y: hidden;
       white-space: nowrap;
-      box-shadow: 0 10px 20px rgba(10, 35, 61, 0.08);
+      scrollbar-width: none;
     }
+    header nav::-webkit-scrollbar { display: none; }
     nav button {
       appearance: none;
-      background: rgba(255,255,255,0.04);
-      border: 1px solid rgba(255,255,255,0.08);
-      color: rgba(255,255,255,0.78);
-      padding: 0.5rem 0.85rem;
-      font-size: 0.88rem;
-      font-weight: 600;
+      background: rgba(255,255,255,0.035);
+      border: 1px solid rgba(255,255,255,0.07);
+      color: rgba(255,255,255,0.76);
+      padding: 0.38rem 0.67rem;
+      font-size: 0.80rem;
+      line-height: 1.1;
+      font-weight: 650;
       cursor: pointer;
       flex: 0 0 auto;
       border-radius: 999px;
       transition: background-color .18s ease, border-color .18s ease, transform .18s ease, color .18s ease, box-shadow .18s ease;
     }
     nav button:hover {
-      transform: translateY(-1px);
       background: rgba(255,255,255,0.10);
-      border-color: rgba(255,255,255,0.16);
+      border-color: rgba(255,255,255,0.14);
       color: #fff;
     }
     nav button.active {
       background: linear-gradient(135deg, rgba(29,164,212,0.24), rgba(19,105,165,0.38));
       color: #fff;
-      border-color: rgba(120, 214, 244, 0.45);
-      box-shadow: inset 0 1px 0 rgba(255,255,255,0.10), 0 8px 18px rgba(7, 24, 42, .22);
+      border-color: rgba(120, 214, 244, 0.40);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.08);
     }
     nav button:focus-visible { outline: 2px solid rgba(255,255,255,0.82); outline-offset: 2px; }
 
@@ -190,40 +193,238 @@
 
     /* Map Tab */
     #map.tab-content { max-width: none; padding: 0; box-shadow: none; margin: 0; }
-    #leaflet-map { width: 100%; height: 78vh; }
-
-    /* Floating controls panel (click-safe below header/nav) */
-    .leaflet-ctrl {
-      position: fixed; z-index: 3000;  /* below header/nav (5001) */
-      right: 12px; top: calc(var(--topbar-h) + 12px);
-      width: 220px; background: rgba(255,255,255,.94);
-      border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,.12);
-      overflow: hidden; pointer-events: auto;
+    #leaflet-map {
+      width: 100%;
+      height: calc(100dvh - var(--topbar-h));
+      min-height: 400px;
     }
-    .leaflet-ctrl * { pointer-events: auto; }
-    /* Hide panel completely when map tab is hidden so it never intercepts clicks */
+
+    /* Floating map controls — compact glass instrument panel */
+    .leaflet-ctrl {
+      position: fixed;
+      z-index: 3000;  /* below header/nav (5001) */
+      right: 12px;
+      top: calc(var(--topbar-h) + 12px);
+      width: 238px;
+      color: #edf7ff;
+      background: rgba(8, 25, 43, .91);
+      border: 1px solid rgba(255,255,255,.12);
+      border-radius: 16px;
+      box-shadow: 0 14px 34px rgba(2, 16, 29, .30);
+      backdrop-filter: blur(12px) saturate(125%);
+      -webkit-backdrop-filter: blur(12px) saturate(125%);
+      overflow: hidden;
+      pointer-events: auto;
+    }
+    .leaflet-ctrl * { box-sizing: border-box; pointer-events: auto; }
     #map.tab-content:not(.active) .leaflet-ctrl { display: none !important; }
 
     .ctrl-header {
-      display: flex; align-items: center; gap: 8px; padding: 8px 10px;
-      background: #0a2946; color: #fff; cursor: pointer; user-select: none;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      min-height: 50px;
+      padding: 8px 10px;
+      background: linear-gradient(135deg, rgba(19,105,165,.34), rgba(255,255,255,.04));
+      color: #fff;
+      cursor: pointer;
+      user-select: none;
+      border-bottom: 1px solid rgba(255,255,255,.08);
     }
-    .ctrl-header .speed { font-size: 1.6rem; font-weight: 800; letter-spacing: .5px; margin-left: auto; }
-    .ctrl-header .units { font-size: .9rem; opacity: .9; margin-left: 4px; }
-    .ctrl-header .chev { width: 18px; height: 18px; transition: transform .2s; }
+    .ctrl-header .speed {
+      display: flex;
+      align-items: baseline;
+      gap: 3px;
+      margin-left: auto;
+      font-size: 1.58rem;
+      font-weight: 800;
+      letter-spacing: -.02em;
+      font-variant-numeric: tabular-nums;
+    }
+    .ctrl-header .units { font-size: .72rem; font-weight: 700; opacity: .66; margin-left: 1px; text-transform: uppercase; letter-spacing: .08em; }
+    .ctrl-header .chev { width: 17px; height: 17px; opacity: .72; transition: transform .2s ease; }
     .leaflet-ctrl.collapsed .chev { transform: rotate(-90deg); }
 
-    .ctrl-body { padding: 8px 10px; display: grid; gap: 6px; }
+    .ctrl-body {
+      padding: 9px;
+      display: grid;
+      gap: 8px;
+      max-height: calc(100dvh - var(--topbar-h) - 80px);
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(255,255,255,.22) transparent;
+    }
+    .ctrl-section {
+      display: grid;
+      gap: 7px;
+      padding: 9px;
+      border: 1px solid rgba(255,255,255,.08);
+      border-radius: 12px;
+      background: rgba(255,255,255,.045);
+    }
+    .ctrl-section-title {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin: 0;
+      color: rgba(255,255,255,.62);
+      font-size: .66rem;
+      font-weight: 800;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
     .ctrl-row { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
     .ctrl-body button, .ctrl-body select, .ctrl-body label { font: inherit; }
     .ctrl-body button, .ctrl-body select {
-      padding: 8px; border: 1px solid #d0d7de; border-radius: 8px; background: #fff;
+      width: 100%;
+      min-height: 34px;
+      padding: 7px 9px;
+      border: 1px solid rgba(255,255,255,.13);
+      border-radius: 9px;
+      background: rgba(255,255,255,.07);
+      color: #f4fbff;
+      font-size: .78rem;
+      font-weight: 650;
+      cursor: pointer;
+      transition: background-color .16s ease, border-color .16s ease, transform .16s ease;
     }
-    .ctrl-body label { display: flex; align-items: center; gap: 8px; }
-    .tiny-note { font-size: 12px; opacity: .8; }
-    .opacity-control { display: grid !important; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; }
-    .opacity-control input[type="range"] { width: 100%; min-width: 0; }
-    .opacity-control .opacity-value { min-width: 3.2em; text-align: right; font-variant-numeric: tabular-nums; }
+    .ctrl-body button:hover, .ctrl-body select:hover {
+      background: rgba(255,255,255,.13);
+      border-color: rgba(126,216,244,.34);
+    }
+    .ctrl-body button:active { transform: translateY(1px); }
+    .ctrl-body button:focus-visible, .ctrl-body select:focus-visible, .ctrl-body input:focus-visible {
+      outline: 2px solid rgba(101,211,244,.78);
+      outline-offset: 2px;
+    }
+    .ctrl-body select { appearance: auto; }
+    .ctrl-body select option { color: #111; background: #fff; }
+
+    .ctrl-toggle {
+      min-height: 34px;
+      padding: 6px 8px;
+      border: 1px solid rgba(255,255,255,.10);
+      border-radius: 9px;
+      background: rgba(255,255,255,.045);
+      display: flex !important;
+      align-items: center;
+      gap: 7px;
+      color: rgba(255,255,255,.88);
+      font-size: .76rem;
+      font-weight: 650;
+      cursor: pointer;
+    }
+    .ctrl-toggle input[type="checkbox"] {
+      appearance: none;
+      width: 28px;
+      height: 16px;
+      margin: 0;
+      border-radius: 999px;
+      background: rgba(255,255,255,.18);
+      position: relative;
+      flex: 0 0 auto;
+      transition: background-color .16s ease;
+    }
+    .ctrl-toggle input[type="checkbox"]::after {
+      content: "";
+      position: absolute;
+      width: 12px;
+      height: 12px;
+      left: 2px;
+      top: 2px;
+      border-radius: 50%;
+      background: #fff;
+      box-shadow: 0 1px 4px rgba(0,0,0,.32);
+      transition: transform .16s ease;
+    }
+    .ctrl-toggle input[type="checkbox"]:checked { background: #1b96c7; }
+    .ctrl-toggle input[type="checkbox"]:checked::after { transform: translateX(12px); }
+
+    .tiny-note { font-size: 10.5px; line-height: 1.35; color: rgba(255,255,255,.52); }
+    .opacity-control {
+      display: grid !important;
+      grid-template-columns: 1fr auto;
+      gap: 5px 8px;
+      align-items: center;
+      color: rgba(255,255,255,.82);
+      font-size: .75rem;
+      font-weight: 650;
+    }
+    .opacity-control input[type="range"] {
+      grid-column: 1 / -1;
+      width: 100%;
+      min-width: 0;
+      margin: 1px 0 0;
+      accent-color: #28a8d6;
+    }
+    .opacity-control .opacity-value {
+      min-width: 3.2em;
+      text-align: right;
+      color: #8edaf2;
+      font-weight: 800;
+      font-variant-numeric: tabular-nums;
+    }
+    .ctrl-body hr { display: none; }
+    .ctrl-action-primary {
+      background: linear-gradient(135deg, rgba(29,164,212,.30), rgba(19,105,165,.30)) !important;
+      border-color: rgba(113,215,246,.28) !important;
+    }
+    #mm-stats {
+      padding: 3px 2px 1px;
+      color: rgba(255,255,255,.55);
+      text-align: center;
+    }
+
+    /* Floating detailed compass */
+    .floating-compass {
+      position: fixed;
+      z-index: 3200;
+      left: 72px;
+      top: calc(var(--topbar-h) + 18px);
+      width: 178px;
+      background: rgba(8, 26, 47, .90);
+      color: #fff;
+      border: 1px solid rgba(255,255,255,.16);
+      border-radius: 16px;
+      box-shadow: 0 12px 30px rgba(4,18,32,.28);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      overflow: hidden;
+      user-select: none;
+      touch-action: none;
+    }
+    #map.tab-content:not(.active) .floating-compass { display: none !important; }
+    .floating-compass.hidden { display: none !important; }
+    .floating-compass-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 9px;
+      cursor: move;
+      background: rgba(255,255,255,.05);
+      border-bottom: 1px solid rgba(255,255,255,.10);
+    }
+    .floating-compass-header strong { font-size: .82rem; letter-spacing: .02em; }
+    .floating-compass-header span { margin-left: auto; font-size: .68rem; color: rgba(255,255,255,.62); }
+    .floating-compass-close {
+      margin-left: 2px; width: 25px; height: 25px; padding: 0; border: 0; border-radius: 50%;
+      background: rgba(255,255,255,.08); color: #fff; cursor: pointer; font-size: 1rem; line-height: 25px;
+    }
+    .floating-compass-close:hover { background: rgba(255,255,255,.16); }
+    .floating-compass-body { padding: 8px 10px 10px; text-align: center; }
+    .detailed-compass-dial { width: 150px; height: 150px; margin: 0 auto 4px; display: block; }
+    .detailed-compass-face { fill: rgba(255,255,255,.96); stroke: rgba(255,255,255,.35); stroke-width: 2; }
+    .detailed-compass-tick { stroke: #48647c; stroke-width: 1.1; }
+    .detailed-compass-tick.major { stroke: #0a2946; stroke-width: 2; }
+    .detailed-compass-label { fill: #0a2946; font: 700 10px Inter, Arial, sans-serif; text-anchor: middle; dominant-baseline: middle; }
+    .detailed-compass-cardinal { fill: #0a2946; font: 800 13px Inter, Arial, sans-serif; text-anchor: middle; dominant-baseline: middle; }
+    .detailed-compass-cardinal.north { fill: #c82727; }
+    .detailed-compass-needle { transform-origin: 75px 75px; transition: transform .12s linear; }
+    .compass-readout { display: flex; align-items: baseline; justify-content: center; gap: 7px; }
+    .compass-readout .degrees { font-size: 1.35rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+    .compass-readout .point { font-size: .82rem; font-weight: 700; color: #8edaf2; }
+    .compass-source { margin-top: 1px; font-size: .66rem; letter-spacing: .09em; text-transform: uppercase; color: rgba(255,255,255,.58); }
 
     /* Compass */
     .compass { position: relative; width: 28px; height: 28px; border-radius: 50%; background: #fff; border: 2px solid #d0d7de; }
@@ -274,18 +475,23 @@
     .collapsible-content { display: none; padding: 1em; background: #fff; }
 
     /* Mobile tweaks */
-    @media (max-width: 760px) {
-      .topbar-inner { align-items: flex-start; flex-direction: column; }
-      .header-meta { font-size: 0.72rem; }
+    @media (max-width: 820px) {
+      .topbar-inner { gap: 8px; padding-inline: 0.48rem; }
+      .brand-copy .eyebrow { display: none; }
+      header h1 { font-size: 0.90rem; }
+      nav button { font-size: 0.77rem; padding: 0.36rem 0.60rem; }
     }
     @media (max-width: 600px) {
-      header { padding: 0.34rem 0.75rem; }
-      .brand-mark { width: 28px; height: 28px; border-radius: 9px; }
-      header h1 { font-size: 0.95rem; }
-      .brand-copy .eyebrow { font-size: 0.62rem; }
-      nav { justify-content: flex-start; padding: 0.42rem 0.55rem 0.5rem; gap: 6px; }
-      nav button { font-size: 0.82rem; padding: 0.48rem 0.75rem; }
+      .topbar-inner { min-height: 40px; gap: 7px; padding: 0.24rem 0.4rem; }
+      .brand-mark { width: 25px; height: 25px; border-radius: 8px; font-size: 12px; }
+      header h1 { font-size: 0.84rem; }
+      nav { gap: 4px; }
+      nav button { font-size: 0.74rem; padding: 0.34rem 0.54rem; }
       .tab-content { padding: .8em; margin: .5em auto; border-radius: 14px; }
+    }
+    @media (max-width: 430px) {
+      .brand-mark { display: none; }
+      header h1 { font-size: 0.80rem; }
     }
   </style>
 </head>
@@ -300,17 +506,15 @@
           <h1>Ottawa Sail Navigator</h1>
         </div>
       </div>
-      <div class="header-meta">Forecast • Charts • GPS</div>
+      <nav aria-label="Primary">
+        <button type="button" id="forecast-tab" class="active" data-tab="forecast" aria-controls="forecast" aria-selected="true">Weather</button>
+        <button type="button" data-tab="radar" aria-controls="radar">Radar</button>
+        <button type="button" data-tab="map" aria-controls="map">Charts</button>
+        <button type="button" data-tab="info" aria-controls="info">Reference</button>
+        <button type="button" data-tab="emergency" aria-controls="emergency">Safety</button>
+      </nav>
     </div>
   </header>
-
-  <nav aria-label="Primary">
-    <button type="button" id="forecast-tab" class="active" data-tab="forecast" aria-controls="forecast" aria-selected="true">Weather</button>
-    <button type="button" data-tab="radar" aria-controls="radar">Radar</button>
-    <button type="button" data-tab="map" aria-controls="map">Charts</button>
-    <button type="button" data-tab="info" aria-controls="info">Reference</button>
-    <button type="button" data-tab="emergency" aria-controls="emergency">Safety</button>
-  </nav>
 
   <!-- Forecast Tab -->
   <section id="forecast" class="tab-content active" role="region" aria-labelledby="forecast-tab" data-forecast-build="20260924-1">
@@ -427,6 +631,32 @@
   <section id="map" class="tab-content" role="region" aria-labelledby="map-tab">
     <div id="leaflet-map" aria-label="Marine Map"></div>
 
+    <!-- Draggable detailed compass -->
+    <div class="floating-compass" id="mm-detailed-compass" aria-label="Detailed heading compass">
+      <div class="floating-compass-header" id="mm-compass-drag">
+        <strong>Heading</strong>
+        <span>drag to move</span>
+        <button class="floating-compass-close" id="mm-compass-hide" type="button" aria-label="Hide compass">×</button>
+      </div>
+      <div class="floating-compass-body">
+        <svg class="detailed-compass-dial" id="mm-compass-svg" viewBox="0 0 150 150" role="img" aria-label="Compass rose">
+          <circle class="detailed-compass-face" cx="75" cy="75" r="71"></circle>
+          <g id="mm-compass-ticks"></g>
+          <g id="mm-compass-labels"></g>
+          <g class="detailed-compass-needle" id="mm-detailed-needle">
+            <polygon points="75,18 69,76 75,70 81,76" fill="#d52828"></polygon>
+            <polygon points="75,132 69,74 75,80 81,74" fill="#425a70"></polygon>
+            <circle cx="75" cy="75" r="7" fill="#0a2946" stroke="#fff" stroke-width="2"></circle>
+          </g>
+        </svg>
+        <div class="compass-readout">
+          <span class="degrees" id="mm-compass-degrees">—°</span>
+          <span class="point" id="mm-compass-point">—</span>
+        </div>
+        <div class="compass-source" id="mm-compass-source">waiting for heading</div>
+      </div>
+    </div>
+
     <!-- Floating controls -->
     <div class="leaflet-ctrl collapsed" id="mm-panel">
       <div class="ctrl-header" id="mm-toggle" aria-expanded="false">
@@ -442,49 +672,55 @@
       </div>
 
       <div class="ctrl-body">
-        <div style="font-weight:700;">GPS</div>
-        <div class="ctrl-row">
-          <button id="mm-startgps" type="button">Start GPS</button>
-          <button id="mm-recenter" type="button">Recenter</button>
+        <div class="ctrl-section">
+          <div class="ctrl-section-title">Navigation</div>
+          <div class="ctrl-row">
+            <button id="mm-startgps" class="ctrl-action-primary" type="button">Start GPS</button>
+            <button id="mm-recenter" type="button">Recenter</button>
+          </div>
+          <div class="ctrl-row">
+            <label class="ctrl-toggle"><input type="checkbox" id="mm-follow" checked> Follow</label>
+            <label class="ctrl-toggle"><input type="checkbox" id="mm-courseup"> Course-up</label>
+          </div>
+          <button id="mm-show-compass" type="button">Show compass</button>
         </div>
 
-        <div class="ctrl-row">
-          <label><input type="checkbox" id="mm-follow" checked> Follow</label>
-          <label><input type="checkbox" id="mm-courseup"> Course-up</label>
+        <div class="ctrl-section">
+          <div class="ctrl-section-title">Chart</div>
+          <label class="opacity-control" for="mm-chart-opacity">
+            <span>Overlay opacity</span>
+            <span id="mm-chart-opacity-value" class="opacity-value">98%</span>
+            <input id="mm-chart-opacity" type="range" min="0" max="100" step="1" value="98" aria-label="Marine chart opacity">
+          </label>
         </div>
-
-        <label class="opacity-control" for="mm-chart-opacity">
-          <span>Chart opacity</span>
-          <input id="mm-chart-opacity" type="range" min="0" max="100" step="1" value="98" aria-label="Marine chart opacity">
-          <span id="mm-chart-opacity-value" class="opacity-value">98%</span>
-        </label>
 
         <!-- Detailed GPS warning text paused to keep the map controls compact.
         <div id="mm-gps-status" class="tiny-note" aria-live="polite"></div>
         -->
 
-        <hr>
-
-        <div style="font-weight:700;">Markers</div>
-        <div class="ctrl-row">
-          <select id="mm-marker-type">
-            <option value="warn">🔴 Warning</option>
-            <option value="fish">🟢 Fish</option>
-            <option value="other">🟡 Other</option>
-          </select>
-          <button id="mm-drop-marker" type="button">Drop marker</button>
+        <div class="ctrl-section">
+          <div class="ctrl-section-title">Markers</div>
+          <div class="ctrl-row">
+            <select id="mm-marker-type" aria-label="Marker type">
+              <option value="warn">🔴 Warning</option>
+              <option value="fish">🟢 Fish</option>
+              <option value="other">🟡 Other</option>
+            </select>
+            <button id="mm-drop-marker" type="button">Drop marker</button>
+          </div>
+          <div class="tiny-note">Choose a type, then tap the map.</div>
         </div>
-        <div class="tiny-note">Tap the map to place when active.</div>
 
-        <hr>
-
-        <div class="ctrl-row">
-          <button id="mm-snapnorth" type="button">Snap North</button>
-          <button id="mm-resettrail" type="button">Reset Trail</button>
+        <div class="ctrl-section">
+          <div class="ctrl-section-title">Tools</div>
+          <div class="ctrl-row">
+            <button id="mm-snapnorth" type="button">North up</button>
+            <button id="mm-resettrail" type="button">Reset trail</button>
+          </div>
+          <button id="mm-exportgpx" type="button">Export GPX</button>
         </div>
-        <button id="mm-exportgpx" type="button">Export GPX</button>
 
-        <div id="mm-stats" class="tiny-note" style="margin-top:6px;"></div>
+        <div id="mm-stats" class="tiny-note"></div>
       </div>
     </div>
   </section>
