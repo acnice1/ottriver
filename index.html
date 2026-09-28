@@ -365,6 +365,83 @@
       font-weight: 800;
       font-variant-numeric: tabular-nums;
     }
+    .measure-readout {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 8px 9px;
+      border-radius: 9px;
+      background: rgba(24, 151, 197, .10);
+      border: 1px solid rgba(111, 213, 244, .16);
+    }
+    .measure-readout .measure-label {
+      color: rgba(255,255,255,.58);
+      font-size: .68rem;
+      font-weight: 750;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+    }
+    .measure-readout .measure-value {
+      color: #a4e7f8;
+      font-size: 1.1rem;
+      font-weight: 850;
+      font-variant-numeric: tabular-nums;
+    }
+    #mm-measure.active {
+      background: linear-gradient(135deg, rgba(29,164,212,.40), rgba(19,105,165,.40));
+      border-color: rgba(111, 213, 244, .48);
+    }
+    .track-readout {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px 10px;
+      padding: 9px;
+      border-radius: 10px;
+      background: rgba(255, 122, 0, .10);
+      border: 1px solid rgba(255, 169, 86, .22);
+    }
+    .track-readout .track-main-label {
+      color: rgba(255,255,255,.58);
+      font-size: .68rem;
+      font-weight: 750;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+    }
+    .track-readout .track-distance {
+      color: #ffb36c;
+      font-size: 1.08rem;
+      font-weight: 850;
+      font-variant-numeric: tabular-nums;
+    }
+    .track-metrics {
+      grid-column: 1 / -1;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 5px;
+      margin-top: 1px;
+    }
+    .track-metric {
+      padding: 5px 4px;
+      border-radius: 7px;
+      background: rgba(255,255,255,.045);
+      text-align: center;
+    }
+    .track-metric span { display: block; }
+    .track-metric .k {
+      color: rgba(255,255,255,.48);
+      font-size: .58rem;
+      font-weight: 750;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+    }
+    .track-metric .v {
+      margin-top: 2px;
+      color: rgba(255,255,255,.90);
+      font-size: .72rem;
+      font-weight: 800;
+      font-variant-numeric: tabular-nums;
+    }
     .ctrl-body hr { display: none; }
     .ctrl-action-primary {
       background: linear-gradient(135deg, rgba(29,164,212,.30), rgba(19,105,165,.30)) !important;
@@ -699,6 +776,47 @@
         -->
 
         <div class="ctrl-section">
+          <div class="ctrl-section-title">Measure</div>
+          <div class="measure-readout">
+            <span class="measure-label">Distance</span>
+            <span id="mm-measure-value" class="measure-value">0.00 NM</span>
+          </div>
+          <div class="ctrl-row">
+            <button id="mm-measure" type="button">Start measure</button>
+            <select id="mm-measure-unit" aria-label="Distance unit">
+              <option value="nm">NM</option>
+              <option value="km">km</option>
+              <option value="mi">miles</option>
+            </select>
+          </div>
+          <button id="mm-measure-clear" type="button">Clear measurement</button>
+          <div class="tiny-note">Start measuring, then tap the map to add route points.</div>
+        </div>
+
+        <div class="ctrl-section">
+          <div class="ctrl-section-title">Track</div>
+          <div class="track-readout">
+            <span class="track-main-label">Current trip</span>
+            <span id="mm-track-distance" class="track-distance">0.00 NM</span>
+            <div class="track-metrics">
+              <div class="track-metric"><span class="k">Elapsed</span><span id="mm-track-time" class="v">0m</span></div>
+              <div class="track-metric"><span class="k">Average</span><span id="mm-track-avg" class="v">0.0 kn</span></div>
+              <div class="track-metric"><span class="k">Maximum</span><span id="mm-track-max" class="v">0.0 kn</span></div>
+            </div>
+          </div>
+          <div class="ctrl-row">
+            <label class="ctrl-toggle"><input type="checkbox" id="mm-trail-recording" checked> Recording</label>
+            <label class="ctrl-toggle"><input type="checkbox" id="mm-trail-visible" checked> Show track</label>
+          </div>
+          <div class="ctrl-row">
+            <button id="mm-newtrip" type="button">New trip</button>
+            <button id="mm-cleartrail" type="button">Clear history</button>
+          </div>
+          <button id="mm-exportgpx" type="button">Export GPX</button>
+          <div id="mm-stats" class="tiny-note"></div>
+        </div>
+
+        <div class="ctrl-section">
           <div class="ctrl-section-title">Markers</div>
           <div class="ctrl-row">
             <select id="mm-marker-type" aria-label="Marker type">
@@ -713,14 +831,8 @@
 
         <div class="ctrl-section">
           <div class="ctrl-section-title">Tools</div>
-          <div class="ctrl-row">
-            <button id="mm-snapnorth" type="button">North up</button>
-            <button id="mm-resettrail" type="button">Reset trail</button>
-          </div>
-          <button id="mm-exportgpx" type="button">Export GPX</button>
+          <button id="mm-snapnorth" type="button">North up</button>
         </div>
-
-        <div id="mm-stats" class="tiny-note"></div>
       </div>
     </div>
   </section>

@@ -38,12 +38,15 @@ const SPEED_MIN_MOVE_M = 2; // ↓ from 5 (lets slow speeds register)
 const SPEED_ACC_FACTOR = 0.2; // ↓ from 0.6 (less harsh accuracy gate)
 
 // Trail cadence (more frequent, based on RAW fixes)
-const TRAIL_MAX_POINTS = 2000;
-const TRAIL_MIN_DIST_M = 2; // ↓ from 5
-const TRAIL_MIN_SEC = 0.75; // 0.5–1 s recommended
-const TRAIL_REDRAW_MS = 1000;
+const TRAIL_MAX_POINTS = 30000;
+const TRAIL_MIN_DIST_M = 5;
+const TRAIL_MIN_SEC = 2;
+const TRAIL_REDRAW_MS = 2000;
 const TRAIL_SAVE_MS = 15000;
 const TRAIL_MAX_ACC_M = 30;
+const TRAIL_ACC_DIST_FACTOR = 0.35; // increase point spacing as GPS uncertainty grows
+const TRAIL_SEGMENT_GAP_MS = 30 * 60 * 1000; // break the drawn line after 30 min without a stored point
+const TRAIL_SEGMENT_JUMP_M = 500; // also break if the next accepted point is implausibly far away
 
 // Staleness / fallbacks
 const MAX_STALE_MS = 4000; // watchdog pull-fresh threshold
@@ -66,6 +69,9 @@ const LS_MARKERS = "sailMarkers_v1";
 const LS_CHART_OPACITY = "sailChartOpacity_v1";
 const LS_COMPASS_POS = "sailCompassPosition_v1";
 const LS_COMPASS_VISIBLE = "sailCompassVisible_v1";
+const LS_MEASURE_UNIT = "sailMeasureUnit_v1";
+const LS_TRAIL_RECORDING = "sailTrailRecording_v1";
+const LS_TRAIL_VISIBLE = "sailTrailVisible_v1";
 
 /* ===== EMA helpers (explicit position & speed EMAs) ===== */
 const makeEma = (alpha) => (current, prev) =>
@@ -409,6 +415,10 @@ let freshFixInFlight = false;
 let trail = [],
   totalDistM = 0;
 let trailWasMoving = false;
+let trailRecording = localStorage.getItem(LS_TRAIL_RECORDING) !== "false";
+let trailVisible = localStorage.getItem(LS_TRAIL_VISIBLE) !== "false";
+let forceTrailSegmentBreak = false;
+let currentTripSegmentId = 0;
 let trailRedrawAt = 0;
 let trailRedrawTimer = null;
 let trailSaveTimer = null;
@@ -417,6 +427,9 @@ let trailDirty = false;
 let courseUp = false;
 let follow = true;
 let addMarkerActive = false;
+let measureActive = false;
+let measurePoints = [];
+let measureUnit = localStorage.getItem(LS_MEASURE_UNIT) || "nm";
 
 // MapLibre DOM markers we add (keeps API simple)
 let markersLayer = [];
@@ -811,9 +824,36 @@ function addAllCharts() {
   });
   if (mmMap.getLayer("trail-line") && mmMap.getLayer("nav-accuracy-fill"))
     mmMap.moveLayer("trail-line", "nav-accuracy-fill");
+  // Keep operational graphics above the marine raster tiles.
+  raiseOperationalLayers();
   chartQualityText = "Marine chart alignment has not been independently verified";
   refreshNavStatus();
 }
+
+function raiseMeasurementLayers() {
+  if (!mmMap) return;
+  ["measure-line-casing", "measure-line", "measure-points"].forEach((id) => {
+    if (mmMap.getLayer(id)) mmMap.moveLayer(id);
+  });
+}
+
+function raiseOperationalLayers() {
+  if (!mmMap) return;
+  // Explicit map stack: charts < accuracy < sailed track < measurement.
+  ["nav-accuracy-fill", "nav-accuracy-outline", "trail-line-casing", "trail-line"].forEach((id) => {
+    if (mmMap.getLayer(id)) mmMap.moveLayer(id);
+  });
+  raiseMeasurementLayers();
+}
+
+function applyTrailVisibility() {
+  if (!mmMap) return;
+  const visibility = trailVisible ? "visible" : "none";
+  ["trail-line-casing", "trail-line"].forEach((id) => {
+    if (mmMap.getLayer(id)) mmMap.setLayoutProperty(id, "visibility", visibility);
+  });
+}
+
 function setChartOpacity(value, persist = true) {
   const next = Math.min(1, Math.max(0, Number(value)));
   if (!Number.isFinite(next)) return;
@@ -884,12 +924,13 @@ function loadTrail() {
     if (Array.isArray(pts)) {
       const now = Date.now();
       trail = pts
+        .filter((p) => Array.isArray(p) && p.length >= 2)
         .slice(-TRAIL_MAX_POINTS)
-        .map((p) =>
-          Array.isArray(p) && p.length >= 2 ? [p[0], p[1], p[2] ?? now] : p
-        );
+        .map((p) => [p[0], p[1], p[2] ?? now, Number.isFinite(p[3]) ? p[3] : 0]);
     }
     totalDistM = parseFloat(localStorage.getItem(LS_DIST) || "0") || 0;
+    currentTripSegmentId = trail.length && Number.isFinite(trail[trail.length - 1][3])
+      ? trail[trail.length - 1][3] : 0;
     trailWasMoving = false;
   } catch (e) {
     trail = [];
@@ -903,22 +944,74 @@ function resetTrail() {
   trail = [];
   totalDistM = 0;
   trailWasMoving = false;
+  currentTripSegmentId = 0;
+  forceTrailSegmentBreak = false;
   trailDirty = true;
   updateTrailSource();
   saveTrail();
   updateStats({ kts: null });
 }
+function formatDuration(ms) {
+  if (!Number.isFinite(ms) || ms <= 0) return "0m";
+  const mins = Math.floor(ms / 60000);
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return h ? `${h}h ${m}m` : `${m}m`;
+}
+
+function currentTripStats() {
+  const pts = trail.filter((p) => Array.isArray(p) && p[3] === currentTripSegmentId);
+  if (pts.length < 2) return { distanceM: 0, elapsedMs: 0, avgKts: 0, maxKts: 0 };
+  let distanceM = 0;
+  let maxKts = 0;
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1], b = pts[i];
+    const d = geoDistMeters(a[0], a[1], b[0], b[1]);
+    distanceM += d;
+    const dt = (b[2] - a[2]) / 1000;
+    if (dt > 0) maxKts = Math.max(maxKts, Math.min(NAV_MAX_PLAUSIBLE_KTS, mpsToKts(d / dt)));
+  }
+  const elapsedMs = Math.max(0, pts[pts.length - 1][2] - pts[0][2]);
+  const avgKts = elapsedMs > 0 ? mpsToKts(distanceM / (elapsedMs / 1000)) : 0;
+  return { distanceM, elapsedMs, avgKts, maxKts };
+}
+
+function updateTrackUi() {
+  const stats = currentTripStats();
+  const distance = $("#mm-track-distance");
+  const elapsed = $("#mm-track-time");
+  const avg = $("#mm-track-avg");
+  const max = $("#mm-track-max");
+  if (distance) distance.textContent = `${fmt(mToNm(stats.distanceM), 2)} NM`;
+  if (elapsed) elapsed.textContent = formatDuration(stats.elapsedMs);
+  if (avg) avg.textContent = `${fmt(stats.avgKts, 1)} kn`;
+  if (max) max.textContent = `${fmt(stats.maxKts, 1)} kn`;
+  const rec = $("#mm-trail-recording");
+  const vis = $("#mm-trail-visible");
+  if (rec) rec.checked = trailRecording;
+  if (vis) vis.checked = trailVisible;
+}
+
 function updateStats({ kts }) {
   const el = document.getElementById("mm-stats");
   if (el) {
-    el.innerHTML = `
-      <div><strong>Speed:</strong> ${fmt(kts, 1)} kn</div>
-      <div><strong>Distance:</strong> ${fmt(mToNm(totalDistM), 2)} NM</div>
-    `;
+    el.textContent = `${trail.length.toLocaleString()} points • ${fmt(mToNm(totalDistM), 2)} NM recorded`;
   }
   const h = document.getElementById("mm-speed");
   if (h) h.textContent = fmt(kts, 1);
+  updateTrackUi();
 }
+
+function startNewTrip() {
+  const lastSegmentId = trail.length && Number.isFinite(trail[trail.length - 1][3])
+    ? trail[trail.length - 1][3] : currentTripSegmentId;
+  currentTripSegmentId = Math.max(currentTripSegmentId, lastSegmentId) + 1;
+  forceTrailSegmentBreak = true;
+  trailWasMoving = false;
+  updateStats({ kts: moving ? speedEmaVal : 0 });
+  setGpsStatus("New trip started. Previous track history is preserved.");
+}
+
 function exportGPX() {
   if (!trail.length) {
     alert("No trail to export yet.");
@@ -935,16 +1028,24 @@ function exportGPX() {
   gpx += `  <metadata><time>${nowISO}</time></metadata>\n`;
   gpx += "  <trk>\n";
   gpx += "    <name>Track</name>\n";
-  gpx += "    <trkseg>\n";
+  let openSegment = false;
+  let activeSegmentId = null;
   for (const p of trail) {
     const lat = p[0],
       lon = p[1],
-      t = p[2];
+      t = p[2],
+      segmentId = Number.isFinite(p[3]) ? p[3] : 0;
+    if (!openSegment || segmentId !== activeSegmentId) {
+      if (openSegment) gpx += "    </trkseg>\n";
+      gpx += "    <trkseg>\n";
+      openSegment = true;
+      activeSegmentId = segmentId;
+    }
     gpx += `      <trkpt lat="${lat.toFixed(6)}" lon="${lon.toFixed(6)}">`;
     if (Number.isFinite(t)) gpx += `<time>${new Date(t).toISOString()}</time>`;
     gpx += `</trkpt>\n`;
   }
-  gpx += "    </trkseg>\n";
+  if (openSegment) gpx += "    </trkseg>\n";
   gpx += "  </trk>\n";
   gpx += "</gpx>\n";
 
@@ -1165,6 +1266,71 @@ function toggleCourseUp(on) {
   }
 }
 
+function measureDistanceMeters() {
+  let total = 0;
+  for (let i = 1; i < measurePoints.length; i++) {
+    const a = measurePoints[i - 1];
+    const b = measurePoints[i];
+    total += geoDistMeters(a.lat, a.lng, b.lat, b.lng);
+  }
+  return total;
+}
+
+function formatMeasureDistance(meters) {
+  if (measureUnit === "km") return `${(meters / 1000).toFixed(meters >= 100000 ? 1 : 2)} km`;
+  if (measureUnit === "mi") return `${(meters / 1609.344).toFixed(meters >= 160934 ? 1 : 2)} mi`;
+  return `${(meters / 1852).toFixed(meters >= 185200 ? 1 : 2)} NM`;
+}
+
+function updateMeasureUi() {
+  const out = $("#mm-measure-value");
+  if (out) out.textContent = formatMeasureDistance(measureDistanceMeters());
+  const btn = $("#mm-measure");
+  if (btn) {
+    btn.textContent = measureActive ? "Stop measure" : "Start measure";
+    btn.classList.toggle("active", measureActive);
+    btn.setAttribute("aria-pressed", String(measureActive));
+  }
+  if (mmMap?.getCanvas?.()) mmMap.getCanvas().style.cursor = measureActive ? "crosshair" : "";
+}
+
+function updateMeasureSource() {
+  if (!mmMap?.getSource?.("measure")) return;
+  const coords = measurePoints.map((p) => [p.lng, p.lat]);
+  const features = [];
+  if (coords.length >= 2) {
+    features.push({
+      type: "Feature",
+      properties: {},
+      geometry: { type: "LineString", coordinates: coords },
+    });
+  }
+  for (const c of coords) {
+    features.push({
+      type: "Feature",
+      properties: {},
+      geometry: { type: "Point", coordinates: c },
+    });
+  }
+  mmMap.getSource("measure").setData({ type: "FeatureCollection", features });
+  updateMeasureUi();
+}
+
+function setMeasureActive(active) {
+  measureActive = !!active;
+  if (measureActive && addMarkerActive) {
+    addMarkerActive = false;
+    const markerBtn = $("#mm-drop-marker");
+    if (markerBtn) markerBtn.textContent = "Drop marker";
+  }
+  updateMeasureUi();
+}
+
+function clearMeasurement() {
+  measurePoints = [];
+  updateMeasureSource();
+}
+
 function buildControls() {
   const panel = document.getElementById("mm-panel");
   const header = document.getElementById("mm-toggle");
@@ -1263,10 +1429,66 @@ function initMarineMapOnce() {
       data: { type: "FeatureCollection", features: [] },
     });
     mmMap.addLayer({
+      id: "trail-line-casing",
+      type: "line",
+      source: "trail",
+      paint: {
+        "line-color": "#17202a",
+        "line-width": 7,
+        "line-opacity": 0.92,
+      },
+    });
+    mmMap.addLayer({
       id: "trail-line",
       type: "line",
       source: "trail",
-      paint: { "line-width": 3, "line-opacity": 0.85 },
+      paint: {
+        "line-color": "#ff7a00",
+        "line-width": 4,
+        "line-opacity": 1,
+      },
+    });
+    applyTrailVisibility();
+    mmMap.addSource("measure", {
+      type: "geojson",
+      data: { type: "FeatureCollection", features: [] },
+    });
+    // A dark casing plus vivid magenta stays legible over white/blue marine charts.
+    mmMap.addLayer({
+      id: "measure-line-casing",
+      type: "line",
+      source: "measure",
+      filter: ["==", ["geometry-type"], "LineString"],
+      paint: {
+        "line-color": "#17202a",
+        "line-width": 9,
+        "line-opacity": 0.78,
+      },
+    });
+    mmMap.addLayer({
+      id: "measure-line",
+      type: "line",
+      source: "measure",
+      filter: ["==", ["geometry-type"], "LineString"],
+      paint: {
+        "line-color": "#ff2aa1",
+        "line-width": 5,
+        "line-opacity": 1,
+        "line-dasharray": [1.7, 1.05],
+      },
+    });
+    mmMap.addLayer({
+      id: "measure-points",
+      type: "circle",
+      source: "measure",
+      filter: ["==", ["geometry-type"], "Point"],
+      paint: {
+        "circle-radius": 7,
+        "circle-color": "#ff2aa1",
+        "circle-opacity": 1,
+        "circle-stroke-color": "#ffffff",
+        "circle-stroke-width": 3.5,
+      },
     });
     mmMap.addSource("nav-accuracy", {
       type: "geojson",
@@ -1282,6 +1504,8 @@ function initMarineMapOnce() {
     });
 
     updateTrailSource();
+    raiseOperationalLayers();
+    applyTrailVisibility();
     // updateAccuracyRing();
     renderMarkersFromStore();
     ensureAllChartBounds().then(addAllCharts);
@@ -1299,6 +1523,11 @@ function initMarineMapOnce() {
   });
 
   mmMap.on("click", (e) => {
+    if (measureActive) {
+      measurePoints.push({ lat: e.lngLat.lat, lng: e.lngLat.lng });
+      updateMeasureSource();
+      return;
+    }
     if (!addMarkerActive) return;
     const type = $("#mm-marker-type")?.value || "other";
     addDomMarker(e.lngLat.lat, e.lngLat.lng, type);
@@ -1436,25 +1665,41 @@ function onPos(p) {
   }
 
   // ---------- Trail: collect moving fixes, batch map redraw and storage ----------
-  const lastPt = trail.length ? trail[trail.length - 1] : null; // [rawLat, rawLon, t]
-  const dtSinceLastPt = lastPt ? (now - lastPt[2]) / 1000 : Infinity;
+  const lastPt = trail.length ? trail[trail.length - 1] : null; // [rawLat, rawLon, t, segmentId]
+  const dtSinceLastPtMs = lastPt ? now - lastPt[2] : Infinity;
+  const dtSinceLastPt = dtSinceLastPtMs / 1000;
   const dRaw = lastPt ? geoDistMeters(latitude, longitude, lastPt[0], lastPt[1]) : 0;
   const goodTrailFix = reliable && acc <= TRAIL_MAX_ACC_M;
-  const shouldAdd = goodTrailFix &&
+  const trailMoveThresholdM = Math.max(
+    TRAIL_MIN_DIST_M,
+    Number.isFinite(acc) ? acc * TRAIL_ACC_DIST_FACTOR : TRAIL_MIN_DIST_M
+  );
+  const shouldAdd = trailRecording && goodTrailFix &&
     (!lastPt || (moving && (!trailWasMoving ||
-      (dRaw >= TRAIL_MIN_DIST_M && dtSinceLastPt >= TRAIL_MIN_SEC))));
+      (dRaw >= trailMoveThresholdM && dtSinceLastPt >= TRAIL_MIN_SEC))));
   if (shouldAdd) {
-    if (moving && trailWasMoving && lastPt) {
+    const autoSegmentBreak = !!lastPt &&
+      (dtSinceLastPtMs >= TRAIL_SEGMENT_GAP_MS || dRaw >= TRAIL_SEGMENT_JUMP_M);
+    const segmentBreak = forceTrailSegmentBreak || autoSegmentBreak;
+    const lastSegmentId = lastPt && Number.isFinite(lastPt[3]) ? lastPt[3] : currentTripSegmentId;
+    const segmentId = segmentBreak
+      ? Math.max(currentTripSegmentId, lastSegmentId + 1)
+      : lastSegmentId;
+
+    if (!segmentBreak && moving && trailWasMoving && lastPt) {
       totalDistM += dRaw;
     }
-    // Store raw coordinates for the trail; only redraw/save periodically.
-    trail.push([latitude, longitude, now]);
+    currentTripSegmentId = segmentId;
+    forceTrailSegmentBreak = false;
+    // Store raw coordinates plus a segment id. Segments prevent false straight
+    // lines between separate sessions, recording pauses or large GPS/location jumps.
+    trail.push([latitude, longitude, now, segmentId]);
     if (trail.length > TRAIL_MAX_POINTS)
       trail.splice(0, trail.length - TRAIL_MAX_POINTS);
     queueTrailRedraw();
     queueTrailSave();
   }
-  trailWasMoving = moving && goodTrailFix;
+  trailWasMoving = trailRecording && moving && goodTrailFix;
 
   // ---------- Follow pan (unconditional when ON) ----------
   if (follow && mmMap && plotLat != null && plotLon != null) {
@@ -1477,17 +1722,30 @@ function onPos(p) {
 // Update trail GeoJSON source
 function updateTrailSource() {
   if (!mmMap || !mmMap.getSource || !mmMap.getSource("trail")) return;
+
+  const segments = [];
+  let current = [];
+  let currentId = null;
+  for (const p of trail) {
+    if (!Array.isArray(p) || p.length < 2) continue;
+    const segmentId = Number.isFinite(p[3]) ? p[3] : 0;
+    if (currentId == null || segmentId === currentId) {
+      current.push([p[1], p[0]]);
+    } else {
+      if (current.length >= 2) segments.push(current);
+      current = [[p[1], p[0]]];
+    }
+    currentId = segmentId;
+  }
+  if (current.length >= 2) segments.push(current);
+
   mmMap.getSource("trail").setData({
     type: "FeatureCollection",
-    features: [
-      {
-        type: "Feature",
-        geometry: {
-          type: "LineString",
-          coordinates: trail.map((p) => [p[1], p[0]]),
-        },
-      },
-    ],
+    features: segments.map((coordinates, i) => ({
+      type: "Feature",
+      properties: { segment: i },
+      geometry: { type: "LineString", coordinates },
+    })),
   });
   trailRedrawAt = Date.now();
 }
@@ -1551,11 +1809,50 @@ function wireControls() {
     toggleCourseUp(e.target.checked);
   });
 
+  const measureUnitSelect = $("#mm-measure-unit");
+  if (measureUnitSelect) {
+    if (!["nm", "km", "mi"].includes(measureUnit)) measureUnit = "nm";
+    measureUnitSelect.value = measureUnit;
+    measureUnitSelect.addEventListener("change", (e) => {
+      measureUnit = e.target.value;
+      try { localStorage.setItem(LS_MEASURE_UNIT, measureUnit); } catch {}
+      updateMeasureUi();
+    });
+  }
+  $("#mm-measure")?.addEventListener("click", () => setMeasureActive(!measureActive));
+  $("#mm-measure-clear")?.addEventListener("click", clearMeasurement);
+  updateMeasureUi();
+
   $("#mm-drop-marker")?.addEventListener("click", (e) => {
+    if (measureActive) setMeasureActive(false);
     addMarkerActive = !addMarkerActive;
     e.target.textContent = addMarkerActive ? "Tap map…" : "Drop marker";
     setGpsStatus(addMarkerActive ? "Tap on the map to place marker." : "");
   });
+
+  const trailRecordingToggle = $("#mm-trail-recording");
+  const trailVisibleToggle = $("#mm-trail-visible");
+  if (trailRecordingToggle) {
+    trailRecordingToggle.checked = trailRecording;
+    trailRecordingToggle.addEventListener("change", (e) => {
+      const wasRecording = trailRecording;
+      trailRecording = !!e.target.checked;
+      try { localStorage.setItem(LS_TRAIL_RECORDING, String(trailRecording)); } catch {}
+      if (trailRecording && !wasRecording) forceTrailSegmentBreak = true;
+      if (!trailRecording) trailWasMoving = false;
+      updateTrackUi();
+    });
+  }
+  if (trailVisibleToggle) {
+    trailVisibleToggle.checked = trailVisible;
+    trailVisibleToggle.addEventListener("change", (e) => {
+      trailVisible = !!e.target.checked;
+      try { localStorage.setItem(LS_TRAIL_VISIBLE, String(trailVisible)); } catch {}
+      applyTrailVisibility();
+      updateTrackUi();
+    });
+  }
+  $("#mm-newtrip")?.addEventListener("click", startNewTrip);
 
   $("#mm-snapnorth")?.addEventListener("click", () => {
     toggleCourseUp(false);
@@ -1563,7 +1860,9 @@ function wireControls() {
     if (chk) chk.checked = false;
   });
 
-  $("#mm-resettrail")?.addEventListener("click", resetTrail);
+  $("#mm-cleartrail")?.addEventListener("click", () => {
+    if (confirm("Clear all stored trail history and distance?")) resetTrail();
+  });
   $("#mm-exportgpx")?.addEventListener("click", exportGPX);
 }
 
