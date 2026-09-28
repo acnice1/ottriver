@@ -110,6 +110,9 @@
     }
     .ctrl-body label { display: flex; align-items: center; gap: 8px; }
     .tiny-note { font-size: 12px; opacity: .8; }
+    .opacity-control { display: grid !important; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; }
+    .opacity-control input[type="range"] { width: 100%; min-width: 0; }
+    .opacity-control .opacity-value { min-width: 3.2em; text-align: right; font-variant-numeric: tabular-nums; }
 
     /* Compass */
     .compass { position: relative; width: 28px; height: 28px; border-radius: 50%; background: #fff; border: 2px solid #d0d7de; }
@@ -321,6 +324,12 @@
           <label><input type="checkbox" id="mm-follow" checked> Follow</label>
           <label><input type="checkbox" id="mm-courseup"> Course-up</label>
         </div>
+
+        <label class="opacity-control" for="mm-chart-opacity">
+          <span>Chart opacity</span>
+          <input id="mm-chart-opacity" type="range" min="0" max="100" step="1" value="98" aria-label="Marine chart opacity">
+          <span id="mm-chart-opacity-value" class="opacity-value">98%</span>
+        </label>
 
         <!-- Detailed GPS warning text paused to keep the map controls compact.
         <div id="mm-gps-status" class="tiny-note" aria-live="polite"></div>

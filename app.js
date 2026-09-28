@@ -63,6 +63,7 @@ const MAP_BEARING_MIN_DEG = 1.5;
 const LS_POINTS = "sailTrailPoints_v1";
 const LS_DIST = "sailTrailDistM_v1";
 const LS_MARKERS = "sailMarkers_v1";
+const LS_CHART_OPACITY = "sailChartOpacity_v1";
 
 /* ===== EMA helpers (explicit position & speed EMAs) ===== */
 const makeEma = (alpha) => (current, prev) =>
@@ -389,6 +390,10 @@ const CHARTS = [
 let mmMap,
   mmBoat = null;
 let chartsLoaded = false;
+let chartOpacity = (() => {
+  const saved = parseFloat(localStorage.getItem(LS_CHART_OPACITY) || "");
+  return Number.isFinite(saved) ? Math.min(1, Math.max(0, saved)) : 0.98;
+})();
 let plotLat = null,
   plotLon = null,
   emaHead = null,
@@ -660,7 +665,7 @@ function addAllCharts() {
         id: lyrId,
         type: "raster",
         source: srcId,
-        paint: { "raster-opacity": 0.98 },
+        paint: { "raster-opacity": chartOpacity },
       }, mmMap.getLayer("nav-accuracy-fill") ? "nav-accuracy-fill" : undefined);
     }
   });
@@ -669,6 +674,34 @@ function addAllCharts() {
   chartQualityText = "Marine chart alignment has not been independently verified";
   refreshNavStatus();
 }
+function setChartOpacity(value, persist = true) {
+  const next = Math.min(1, Math.max(0, Number(value)));
+  if (!Number.isFinite(next)) return;
+  chartOpacity = next;
+
+  if (mmMap) {
+    CHARTS.forEach((def) => {
+      const lyrId = `chart-${def.name}-lyr`;
+      if (mmMap.getLayer(lyrId)) {
+        mmMap.setPaintProperty(lyrId, "raster-opacity", chartOpacity);
+      }
+    });
+  }
+
+  const slider = $("#mm-chart-opacity");
+  const label = $("#mm-chart-opacity-value");
+  if (slider && Number(slider.value) !== Math.round(chartOpacity * 100)) {
+    slider.value = String(Math.round(chartOpacity * 100));
+  }
+  if (label) label.textContent = `${Math.round(chartOpacity * 100)}%`;
+
+  if (persist) {
+    try {
+      localStorage.setItem(LS_CHART_OPACITY, String(chartOpacity));
+    } catch (_) {}
+  }
+}
+
 function saveTrail() {
   try {
     localStorage.setItem(LS_POINTS, JSON.stringify(trail));
@@ -1356,6 +1389,15 @@ setInterval(() => {
 function wireControls() {
   $("#mm-startgps")?.addEventListener("click", startGpsForMap);
   $("#mm-recenter")?.addEventListener("click", recenterToBoat);
+
+  const chartOpacitySlider = $("#mm-chart-opacity");
+  if (chartOpacitySlider) {
+    chartOpacitySlider.value = String(Math.round(chartOpacity * 100));
+    setChartOpacity(chartOpacity, false);
+    chartOpacitySlider.addEventListener("input", (e) => {
+      setChartOpacity(Number(e.target.value) / 100);
+    });
+  }
 
   $("#mm-follow")?.addEventListener("change", (e) => {
     follow = !!e.target.checked;
