@@ -1395,8 +1395,8 @@ function toggleCourseUp(on) {
 
 /* =========================================================
    Hydro intelligence — 1550A proof-of-concept
-   Land and dark-blue water are treated as route hazards; light-blue,
-   white water and extraction gaps are acceptable. Data loads from hydro_1550A.js
+   Land and dark-blue water are treated as route hazards. Other areas are
+   acceptable. Data loads from hydro_1550A.js
    so it also works when the app is opened from file://.
    ========================================================= */
 function hydroFlattenParts(fc) {
@@ -1477,10 +1477,8 @@ function hydroPointInLayer(layer, x, y) {
 function ensureHydroIndex() {
   if (hydroIndex) return hydroIndex;
   const h = window.HYDRO_1550A;
-  if (!h?.white || !h?.light || !h?.dark || !h?.land) return null;
+  if (!h?.dark || !h?.land) return null;
   hydroIndex = {
-    white: hydroBuildLayerIndex(h.white),
-    light: hydroBuildLayerIndex(h.light),
     dark: hydroBuildLayerIndex(h.dark),
     land: hydroBuildLayerIndex(h.land),
   };
@@ -1489,24 +1487,12 @@ function ensureHydroIndex() {
   return hydroIndex;
 }
 
-function hydroWaterClassAt(lng, lat) {
-  const h = ensureHydroIndex();
-  if (!h) return "unavailable";
-  if (hydroPointInLayer(h.dark, lng, lat)) return "dark";
-  if (hydroPointInLayer(h.light, lng, lat)) return "light";
-  if (hydroPointInLayer(h.white, lng, lat)) return "white";
-  return "outside";
-}
-
 function hydroClassAt(lng, lat) {
   const h = ensureHydroIndex();
   if (!h) return "unavailable";
-  // Sailing-rule model: land and dark-blue water are hazards.
-  // Light-blue, white water, and extraction gaps are not warnings.
+  // Sailing-rule model: only land and dark-blue water are hazards.
   if (hydroPointInLayer(h.land, lng, lat)) return "land";
   if (hydroPointInLayer(h.dark, lng, lat)) return "dark";
-  if (hydroPointInLayer(h.light, lng, lat)) return "light";
-  if (hydroPointInLayer(h.white, lng, lat)) return "white";
   return "other";
 }
 
@@ -1517,7 +1503,7 @@ function routeHydroAssessment(a, b) {
   const meters = geoDistMeters(a.lat, a.lng, b.lat, b.lng);
   const stepM = Math.max(HYDRO_SAMPLE_MIN_M, Math.min(HYDRO_SAMPLE_MAX_M, meters / HYDRO_SAMPLE_TARGET || HYDRO_SAMPLE_MIN_M));
   const steps = Math.max(1, Math.ceil(meters / stepM));
-  const counts = { land: 0, dark: 0, light: 0, white: 0, other: 0 };
+  const counts = { land: 0, dark: 0, other: 0 };
 
   for (let i = 0; i <= steps; i++) {
     const t = i / steps;
@@ -1540,8 +1526,6 @@ function routeHydroAssessment(a, b) {
 function ensureHydroMapLayers() {
   if (!mmMap || !window.HYDRO_1550A) return;
   const defs = [
-    ["white", "#f7fbff", 0.34],
-    ["light", "#71c6ec", 0.35],
     ["dark", "#277fb5", 0.42],
     ["land", "#4b5563", 0.38],
   ];
@@ -1566,7 +1550,7 @@ function applyHydroVisibility() {
   if (!mmMap) return;
   if (hydroVisible) ensureHydroMapLayers();
   const visibility = hydroVisible ? "visible" : "none";
-  ["hydro-white-fill", "hydro-light-fill", "hydro-dark-fill", "hydro-land-fill"].forEach((id) => {
+  ["hydro-dark-fill", "hydro-land-fill"].forEach((id) => {
     if (mmMap.getLayer(id)) mmMap.setLayoutProperty(id, "visibility", visibility);
   });
   const chk = $("#mm-hydro-visible");
