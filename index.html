@@ -900,13 +900,14 @@
           <div class="ctrl-section-title">Hydro intelligence</div>
           <div class="hydro-readout">
             <strong id="mm-hydro-status">1550A model loading…</strong>
-            <div class="tiny-note">Route warning logic: land or dark-blue water is a problem; light-blue, white water and small extraction gaps are treated as OK.</div>
+            <div class="tiny-note">Route warning logic: avoid land and stay at least 10 m from dark-blue shallow water and non-buoy hazards. Red/green buoys are exempt from the 10 m hazard rule.</div>
           </div>
           <label class="ctrl-toggle"><input type="checkbox" id="mm-hydro-visible"> Show hydro zones</label>
           <div class="hydro-legend" aria-label="Hydro intelligence legend">
-            <span><i class="hydro-swatch" style="background:#22a06b"></i>White / light blue / other: OK</span>
             <span><i class="hydro-swatch" style="background:#ef4444"></i>Dark blue: shallow</span>
-            <span><i class="hydro-swatch" style="background:#111827"></i>Land: invalid</span>
+            <span><i class="hydro-swatch" style="background:#ef4444"></i>Land: invalid</span>
+            <span><i class="hydro-swatch" style="background:#f59e0b"></i>Hazards: 10 m</span>
+            <span><i class="hydro-swatch" style="background:#22c55e"></i>Red/green buoys: exempt</span>
           </div>
         </div>
 
@@ -1171,7 +1172,7 @@
   </section>
 
   <!-- App JS -->
-  <script src="hydro/hydro_1550A.js?v=20260929-1"></script>
-  <script type="module" src="app.js?v=20260929-hydro2"></script>
+  <script src="hydro/hydro_1550A.js?v=20260929-2"></script>
+  <script type="module" src="app.js?v=20260929-hazards10"></script>
 </body>
 </html>

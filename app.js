@@ -1394,9 +1394,10 @@ function toggleCourseUp(on) {
 }
 
 /* =========================================================
-   Hydro intelligence — 1550A proof-of-concept
-   Land and dark-blue water are treated as route hazards. Other areas are
-   acceptable. Data loads from hydro_1550A.js
+   Hydro intelligence — 1550A
+   Land is a hard invalid route. Dark-blue shallow water has a 10 m safety
+   envelope. Point hazards also have a 10 m exclusion radius, except red and
+   green buoys. Data loads from hydro_1550A.js
    so it also works when the app is opened from file://.
    ========================================================= */
 function hydroFlattenParts(fc) {
@@ -1480,7 +1481,9 @@ function ensureHydroIndex() {
   if (!h?.dark || !h?.land) return null;
   hydroIndex = {
     dark: hydroBuildLayerIndex(h.dark),
+    dark10: hydroBuildLayerIndex(h.dark10 || h.dark),
     land: hydroBuildLayerIndex(h.land),
+    hazards: (h.hazards?.features || []).filter((f) => f?.geometry?.type === "Point"),
   };
   const status = $("#mm-hydro-status");
   if (status) status.textContent = "1550A hydro model ready";
@@ -1490,10 +1493,42 @@ function ensureHydroIndex() {
 function hydroClassAt(lng, lat) {
   const h = ensureHydroIndex();
   if (!h) return "unavailable";
-  // Sailing-rule model: only land and dark-blue water are hazards.
   if (hydroPointInLayer(h.land, lng, lat)) return "land";
-  if (hydroPointInLayer(h.dark, lng, lat)) return "dark";
+  if (hydroPointInLayer(h.dark10, lng, lat)) return "dark10";
   return "other";
+}
+
+function routePointHazardDistanceMeters(a, b, feature) {
+  const c = feature?.geometry?.coordinates;
+  if (!c || c.length < 2) return Infinity;
+  const lng = Number(c[0]), lat = Number(c[1]);
+  if (!Number.isFinite(lng) || !Number.isFinite(lat)) return Infinity;
+  const mLat = 111320;
+  const mLng = 111320 * Math.cos(lat * Math.PI / 180);
+  const ax = (a.lng - lng) * mLng, ay = (a.lat - lat) * mLat;
+  const bx = (b.lng - lng) * mLng, by = (b.lat - lat) * mLat;
+  const dx = bx - ax, dy = by - ay;
+  const denom = dx * dx + dy * dy;
+  const t = denom > 0 ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / denom)) : 0;
+  const x = ax + t * dx, y = ay + t * dy;
+  return Math.hypot(x, y);
+}
+
+function hydroHazardIsExempt(feature) {
+  const type = String(feature?.properties?.Type || "").trim().toLowerCase();
+  return type === "red buoy" || type === "green buoy";
+}
+
+function nearestRouteHazard(a, b) {
+  const h = ensureHydroIndex();
+  if (!h) return null;
+  let best = null;
+  for (const feature of h.hazards || []) {
+    if (hydroHazardIsExempt(feature)) continue;
+    const distanceM = routePointHazardDistanceMeters(a, b, feature);
+    if (!best || distanceM < best.distanceM) best = { feature, distanceM };
+  }
+  return best;
 }
 
 function routeHydroAssessment(a, b) {
@@ -1503,7 +1538,7 @@ function routeHydroAssessment(a, b) {
   const meters = geoDistMeters(a.lat, a.lng, b.lat, b.lng);
   const stepM = Math.max(HYDRO_SAMPLE_MIN_M, Math.min(HYDRO_SAMPLE_MAX_M, meters / HYDRO_SAMPLE_TARGET || HYDRO_SAMPLE_MIN_M));
   const steps = Math.max(1, Math.ceil(meters / stepM));
-  const counts = { land: 0, dark: 0, other: 0 };
+  const counts = { land: 0, dark10: 0, other: 0 };
 
   for (let i = 0; i <= steps; i++) {
     const t = i / steps;
@@ -1514,13 +1549,117 @@ function routeHydroAssessment(a, b) {
     else counts.other++;
   }
 
+  const hazard = nearestRouteHazard(a, b);
+  const hazardNear = !!hazard && hazard.distanceM < 10;
+  const shallowNear = counts.dark10 > 0;
+
   if (counts.land > 0) {
-    return { kind: "land", label: "⛔ Land / invalid", color: "#ef4444", counts };
+    return { kind: "land", label: "⛔ Land / invalid", color: "#ef4444", counts, hazard };
   }
-  if (counts.dark > 0) {
-    return { kind: "dark", label: "⚠ Dark blue / shallow", color: "#ef4444", counts };
+  if (shallowNear && hazardNear) {
+    const name = hazard.feature?.properties?.Name || hazard.feature?.properties?.Type || "hazard";
+    return { kind: "multi", label: `⚠ Shallow water + ${name} within 10 m`, color: "#ef4444", counts, hazard };
   }
-  return { kind: "ok", label: "✓ Hydro OK", color: "#22a06b", counts };
+  if (shallowNear) {
+    return { kind: "dark10", label: "⚠ Within 10 m of shallow water", color: "#ef4444", counts, hazard };
+  }
+  if (hazardNear) {
+    const name = hazard.feature?.properties?.Name || hazard.feature?.properties?.Type || "Hazard";
+    return { kind: "hazard", label: `⚠ ${name} · ${Math.max(0, Math.round(hazard.distanceM))} m`, color: "#ef4444", counts, hazard };
+  }
+  return { kind: "ok", label: "✓ Hydro OK", color: "#22a06b", counts, hazard };
+}
+
+function ensureHazardMapLayer() {
+  if (!mmMap || !window.HYDRO_1550A?.hazards) return;
+  const src = "hydro-hazards";
+  const lyr = "hydro-hazards-symbol";
+  if (!mmMap.getSource(src)) mmMap.addSource(src, { type: "geojson", data: window.HYDRO_1550A.hazards });
+
+  function addHazardIcon(name, shape, fill) {
+    if (mmMap.hasImage(name)) return;
+    const size = 24;
+    const canvas = document.createElement("canvas");
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext("2d");
+    ctx.clearRect(0, 0, size, size);
+    ctx.fillStyle = fill;
+    ctx.strokeStyle = "rgba(20,24,28,0.9)";
+    ctx.lineWidth = 1.5;
+    ctx.lineJoin = "round";
+    ctx.beginPath();
+    if (shape === "triangle") {
+      ctx.moveTo(12, 3.5);
+      ctx.lineTo(20, 19.5);
+      ctx.lineTo(4, 19.5);
+      ctx.closePath();
+    } else if (shape === "can") {
+      ctx.rect(6, 4.5, 12, 15);
+    } else {
+      ctx.moveTo(12, 3.5);
+      ctx.lineTo(20.5, 12);
+      ctx.lineTo(12, 20.5);
+      ctx.lineTo(3.5, 12);
+      ctx.closePath();
+    }
+    ctx.fill();
+    ctx.stroke();
+    mmMap.addImage(name, ctx.getImageData(0, 0, size, size), { pixelRatio: 2 });
+  }
+
+  addHazardIcon("buoy-red-cone", "triangle", "#ef4444");
+  addHazardIcon("buoy-green-can", "can", "#22c55e");
+  addHazardIcon("hazard-diamond", "diamond", "#f59e0b");
+
+  if (!mmMap.getLayer(lyr)) {
+    mmMap.addLayer({
+      id: lyr,
+      type: "symbol",
+      source: src,
+      layout: {
+        "icon-image": ["match", ["get", "Type"],
+          "Red Buoy", "buoy-red-cone",
+          "Green Buoy", "buoy-green-can",
+          "hazard-diamond"
+        ],
+        "icon-size": ["interpolate", ["linear"], ["zoom"],
+          9, 0.42,
+          12, 0.52,
+          15, 0.72,
+          17, 0.88
+        ],
+        "icon-allow-overlap": true,
+        "icon-ignore-placement": true,
+      },
+      paint: {
+        "icon-opacity": ["interpolate", ["linear"], ["zoom"],
+          9, 0.72,
+          12, 0.84,
+          15, 0.94
+        ],
+      },
+    });
+    mmMap.on("mouseenter", lyr, () => { mmMap.getCanvas().style.cursor = "pointer"; });
+    mmMap.on("mouseleave", lyr, () => { mmMap.getCanvas().style.cursor = measureActive ? "crosshair" : ""; });
+    mmMap.on("click", lyr, (e) => {
+      e.originalEvent?.stopPropagation?.();
+      const f = e.features?.[0];
+      if (!f) return;
+      const p = f.properties || {};
+      const rows = [
+        p.Name ? `<strong>${String(p.Name)}</strong>` : "<strong>Hazard</strong>",
+        p.Type ? `Type: ${String(p.Type)}` : "",
+        p.Depth !== undefined && p.Depth !== null && p.Depth !== "" ? `Depth: ${String(p.Depth)} ft` : "",
+        p.Severity ? `Severity: ${String(p.Severity)}` : "",
+        p.Notes ? String(p.Notes) : "",
+      ].filter(Boolean).join("<br>");
+      new maplibregl.Popup({ closeButton: true, closeOnClick: true })
+        .setLngLat(e.lngLat)
+        .setHTML(rows)
+        .addTo(mmMap);
+    });
+  }
 }
 
 function ensureHydroMapLayers() {
@@ -1565,9 +1704,10 @@ function addHydroLayers() {
   }
   const status = $("#mm-hydro-status");
   if (status) status.textContent = "1550A hydro model ready";
-  // Build the route-query index once. The much heavier MapLibre debug layers
-  // are created only if the user explicitly turns on Show hydro zones.
+  // Build the route-query index once. Hazard points are operational and remain
+  // visible; the heavier polygon fills are only shown by the debug toggle.
   ensureHydroIndex();
+  ensureHazardMapLayer();
   applyHydroVisibility();
 }
 
