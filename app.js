@@ -74,6 +74,7 @@ const LS_MEASURE_UNIT = "sailMeasureUnit_v1";
 const LS_ROUTE_SPEED = "sailRouteSpeedKts_v1";
 const LS_TRAIL_RECORDING = "sailTrailRecording_v1";
 const LS_TRAIL_VISIBLE = "sailTrailVisible_v1";
+const LS_HYDRO_VISIBLE = "sailHydroVisible_v1";
 
 /* ===== EMA helpers (explicit position & speed EMAs) ===== */
 const makeEma = (alpha) => (current, prev) =>
@@ -438,6 +439,13 @@ let measurePoints = [];
 let measureUnit = localStorage.getItem(LS_MEASURE_UNIT) || "nm";
 let routeSpeedKts = parseFloat(localStorage.getItem(LS_ROUTE_SPEED) || "4.5") || 4.5;
 let routeWaypointMarkers = [];
+let routeHydroAssessments = [];
+let hydroVisible = localStorage.getItem(LS_HYDRO_VISIBLE) === "true";
+let hydroIndex = null;
+const HYDRO_GRID_DEG = 0.0125;
+const HYDRO_SAMPLE_MIN_M = 5;
+const HYDRO_SAMPLE_MAX_M = 6;
+const HYDRO_SAMPLE_TARGET = 1000;
 
 // MapLibre DOM markers we add (keeps API simple)
 let markersLayer = [];
@@ -1385,6 +1393,200 @@ function toggleCourseUp(on) {
   }
 }
 
+/* =========================================================
+   Hydro intelligence — 1550A proof-of-concept
+   Land and dark-blue water are treated as route hazards; light-blue,
+   white water and extraction gaps are acceptable. Data loads from hydro_1550A.js
+   so it also works when the app is opened from file://.
+   ========================================================= */
+function hydroFlattenParts(fc) {
+  const parts = [];
+  for (const feature of fc?.features || []) {
+    const g = feature?.geometry;
+    if (!g) continue;
+    const polys = g.type === "Polygon" ? [g.coordinates] :
+      (g.type === "MultiPolygon" ? g.coordinates : []);
+    for (const rings of polys) {
+      if (!rings?.length || !rings[0]?.length) continue;
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const [x, y] of rings[0]) {
+        if (x < minX) minX = x; if (x > maxX) maxX = x;
+        if (y < minY) minY = y; if (y > maxY) maxY = y;
+      }
+      if (Number.isFinite(minX)) parts.push({ rings, bbox: [minX, minY, maxX, maxY] });
+    }
+  }
+  return parts;
+}
+
+function hydroCellKey(x, y) {
+  return `${Math.floor(x / HYDRO_GRID_DEG)},${Math.floor(y / HYDRO_GRID_DEG)}`;
+}
+
+function hydroBuildLayerIndex(fc) {
+  const parts = hydroFlattenParts(fc);
+  const grid = new Map();
+  parts.forEach((part, idx) => {
+    const [minX, minY, maxX, maxY] = part.bbox;
+    const x0 = Math.floor(minX / HYDRO_GRID_DEG), x1 = Math.floor(maxX / HYDRO_GRID_DEG);
+    const y0 = Math.floor(minY / HYDRO_GRID_DEG), y1 = Math.floor(maxY / HYDRO_GRID_DEG);
+    for (let ix = x0; ix <= x1; ix++) {
+      for (let iy = y0; iy <= y1; iy++) {
+        const key = `${ix},${iy}`;
+        let bucket = grid.get(key);
+        if (!bucket) grid.set(key, bucket = []);
+        bucket.push(idx);
+      }
+    }
+  });
+  return { parts, grid };
+}
+
+function hydroPointInRing(x, y, ring) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i][0], yi = ring[i][1];
+    const xj = ring[j][0], yj = ring[j][1];
+    const hit = ((yi > y) !== (yj > y)) &&
+      (x < (xj - xi) * (y - yi) / ((yj - yi) || 1e-15) + xi);
+    if (hit) inside = !inside;
+  }
+  return inside;
+}
+
+function hydroPointInPart(x, y, part) {
+  const [minX, minY, maxX, maxY] = part.bbox;
+  if (x < minX || x > maxX || y < minY || y > maxY) return false;
+  if (!hydroPointInRing(x, y, part.rings[0])) return false;
+  for (let i = 1; i < part.rings.length; i++) {
+    if (hydroPointInRing(x, y, part.rings[i])) return false;
+  }
+  return true;
+}
+
+function hydroPointInLayer(layer, x, y) {
+  if (!layer) return false;
+  const bucket = layer.grid.get(hydroCellKey(x, y));
+  if (!bucket) return false;
+  for (const idx of bucket) {
+    if (hydroPointInPart(x, y, layer.parts[idx])) return true;
+  }
+  return false;
+}
+
+function ensureHydroIndex() {
+  if (hydroIndex) return hydroIndex;
+  const h = window.HYDRO_1550A;
+  if (!h?.white || !h?.light || !h?.dark || !h?.land) return null;
+  hydroIndex = {
+    white: hydroBuildLayerIndex(h.white),
+    light: hydroBuildLayerIndex(h.light),
+    dark: hydroBuildLayerIndex(h.dark),
+    land: hydroBuildLayerIndex(h.land),
+  };
+  const status = $("#mm-hydro-status");
+  if (status) status.textContent = "1550A hydro model ready";
+  return hydroIndex;
+}
+
+function hydroWaterClassAt(lng, lat) {
+  const h = ensureHydroIndex();
+  if (!h) return "unavailable";
+  if (hydroPointInLayer(h.dark, lng, lat)) return "dark";
+  if (hydroPointInLayer(h.light, lng, lat)) return "light";
+  if (hydroPointInLayer(h.white, lng, lat)) return "white";
+  return "outside";
+}
+
+function hydroClassAt(lng, lat) {
+  const h = ensureHydroIndex();
+  if (!h) return "unavailable";
+  // Sailing-rule model: land and dark-blue water are hazards.
+  // Light-blue, white water, and extraction gaps are not warnings.
+  if (hydroPointInLayer(h.land, lng, lat)) return "land";
+  if (hydroPointInLayer(h.dark, lng, lat)) return "dark";
+  if (hydroPointInLayer(h.light, lng, lat)) return "light";
+  if (hydroPointInLayer(h.white, lng, lat)) return "white";
+  return "other";
+}
+
+function routeHydroAssessment(a, b) {
+  if (!ensureHydroIndex()) {
+    return { kind: "unavailable", label: "Hydro model unavailable", color: "#64748b" };
+  }
+  const meters = geoDistMeters(a.lat, a.lng, b.lat, b.lng);
+  const stepM = Math.max(HYDRO_SAMPLE_MIN_M, Math.min(HYDRO_SAMPLE_MAX_M, meters / HYDRO_SAMPLE_TARGET || HYDRO_SAMPLE_MIN_M));
+  const steps = Math.max(1, Math.ceil(meters / stepM));
+  const counts = { land: 0, dark: 0, light: 0, white: 0, other: 0 };
+
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const lat = a.lat + (b.lat - a.lat) * t;
+    const lng = a.lng + (b.lng - a.lng) * t;
+    const kind = hydroClassAt(lng, lat);
+    if (counts[kind] != null) counts[kind]++;
+    else counts.other++;
+  }
+
+  if (counts.land > 0) {
+    return { kind: "land", label: "⛔ Land / invalid", color: "#ef4444", counts };
+  }
+  if (counts.dark > 0) {
+    return { kind: "dark", label: "⚠ Dark blue / shallow", color: "#ef4444", counts };
+  }
+  return { kind: "ok", label: "✓ Hydro OK", color: "#22a06b", counts };
+}
+
+function ensureHydroMapLayers() {
+  if (!mmMap || !window.HYDRO_1550A) return;
+  const defs = [
+    ["white", "#f7fbff", 0.34],
+    ["light", "#71c6ec", 0.35],
+    ["dark", "#277fb5", 0.42],
+    ["land", "#4b5563", 0.38],
+  ];
+  for (const [key, color, opacity] of defs) {
+    const src = `hydro-${key}`;
+    const lyr = `hydro-${key}-fill`;
+    if (!mmMap.getSource(src)) mmMap.addSource(src, { type: "geojson", data: window.HYDRO_1550A[key] });
+    if (!mmMap.getLayer(lyr)) {
+      mmMap.addLayer({
+        id: lyr,
+        type: "fill",
+        source: src,
+        layout: { visibility: "visible" },
+        paint: { "fill-color": color, "fill-opacity": opacity, "fill-outline-color": color },
+      });
+    }
+  }
+  raiseOperationalLayers();
+}
+
+function applyHydroVisibility() {
+  if (!mmMap) return;
+  if (hydroVisible) ensureHydroMapLayers();
+  const visibility = hydroVisible ? "visible" : "none";
+  ["hydro-white-fill", "hydro-light-fill", "hydro-dark-fill", "hydro-land-fill"].forEach((id) => {
+    if (mmMap.getLayer(id)) mmMap.setLayoutProperty(id, "visibility", visibility);
+  });
+  const chk = $("#mm-hydro-visible");
+  if (chk) chk.checked = hydroVisible;
+}
+
+function addHydroLayers() {
+  if (!mmMap || !window.HYDRO_1550A) {
+    const status = $("#mm-hydro-status");
+    if (status) status.textContent = "1550A hydro model unavailable";
+    return;
+  }
+  const status = $("#mm-hydro-status");
+  if (status) status.textContent = "1550A hydro model ready";
+  // Build the route-query index once. The much heavier MapLibre debug layers
+  // are created only if the user explicitly turns on Show hydro zones.
+  ensureHydroIndex();
+  applyHydroVisibility();
+}
+
 function routeBearingDeg(a, b) {
   const r = Math.PI / 180;
   const lat1 = a.lat * r, lat2 = b.lat * r;
@@ -1503,9 +1705,10 @@ function updateMeasureUi() {
       const div = document.createElement("div");
       div.className = "route-leg";
       const efficiencyColor = routeEfficiencyColor(profile.efficiency);
+      const hydro = routeHydroAssessments[i - 1] || routeHydroAssessment(a, b);
       div.style.borderLeft = `4px solid ${efficiencyColor}`;
       div.style.paddingLeft = "8px";
-      div.innerHTML = `<span>${i}→${i + 1}</span><span class="bearing">${String(bearing).padStart(3, "0")}° · ${pointText}</span><span class="distance">${formatMeasureDistance(meters)} · ${eta}</span>`;
+      div.innerHTML = `<span>${i}→${i + 1}</span><span class="bearing">${String(bearing).padStart(3, "0")}° · ${pointText}</span><span class="distance">${formatMeasureDistance(meters)} · ${eta}</span><span class="hydro-status"><i class="hydro-dot" style="background:${hydro.color}"></i>${hydro.label}</span>`;
       legsEl.appendChild(div);
     }
   }
@@ -1546,12 +1749,16 @@ function syncRouteWaypointMarkers() {
 function updateMeasureSource(syncMarkers = true) {
   if (!mmMap?.getSource?.("measure")) return;
   const features = [];
-  // Each route leg is its own feature so MapLibre can colour it by sailing efficiency.
+  routeHydroAssessments = [];
+  // Each route leg is its own feature. The inner line keeps wind-efficiency
+  // colour; the outer casing carries the independent hydro classification.
   for (let i = 1; i < measurePoints.length; i++) {
     const a = measurePoints[i - 1];
     const b = measurePoints[i];
     const bearing = routeBearingDeg(a, b);
     const profile = routeSailingProfile(bearing);
+    const hydro = routeHydroAssessment(a, b);
+    routeHydroAssessments.push(hydro);
     features.push({
       type: "Feature",
       properties: {
@@ -1559,6 +1766,8 @@ function updateMeasureSource(syncMarkers = true) {
         efficiency: profile.efficiency,
         pointOfSail: profile.code,
         tack: profile.tack ? 1 : 0,
+        hydroKind: hydro.kind,
+        hydroColor: hydro.color,
       },
       geometry: {
         type: "LineString",
@@ -1650,6 +1859,16 @@ function buildControls() {
     }
   }
 
+  const hydroToggle = $("#mm-hydro-visible");
+  if (hydroToggle) {
+    hydroToggle.checked = hydroVisible;
+    hydroToggle.addEventListener("change", () => {
+      hydroVisible = hydroToggle.checked;
+      try { localStorage.setItem(LS_HYDRO_VISIBLE, String(hydroVisible)); } catch (_) {}
+      applyHydroVisibility();
+    });
+  }
+
   updateStats({ kts: null });
 }
 
@@ -1729,9 +1948,9 @@ function initMarineMapOnce() {
       source: "measure",
       filter: ["==", ["geometry-type"], "LineString"],
       paint: {
-        "line-color": "#17202a",
-        "line-width": 9,
-        "line-opacity": 0.78,
+        "line-color": ["coalesce", ["get", "hydroColor"], "#17202a"],
+        "line-width": 10,
+        "line-opacity": 0.86,
       },
     });
     mmMap.addLayer({
@@ -1784,7 +2003,10 @@ function initMarineMapOnce() {
     applyTrailVisibility();
     // updateAccuracyRing();
     renderMarkersFromStore();
-    ensureAllChartBounds().then(addAllCharts);
+    ensureAllChartBounds().then(() => {
+      addAllCharts();
+      addHydroLayers();
+    });
   });
 
   ["dragstart", "zoomstart", "rotatestart"].forEach((ev) => {

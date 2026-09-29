@@ -434,6 +434,41 @@
     }
     .route-leg .bearing { color: #ff9bd3; font-weight: 800; font-variant-numeric: tabular-nums; }
     .route-leg .distance { text-align: right; font-variant-numeric: tabular-nums; }
+    .route-leg .hydro-status {
+      grid-column: 1 / -1;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+      color: rgba(255,255,255,.72);
+      font-size: .64rem;
+      line-height: 1.25;
+    }
+    .route-leg .hydro-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex: 0 0 auto;
+      box-shadow: 0 0 0 1px rgba(255,255,255,.28);
+    }
+    .hydro-readout {
+      display: grid;
+      gap: 6px;
+      padding: 8px 9px;
+      border-radius: 9px;
+      background: rgba(45, 164, 190, .08);
+      border: 1px solid rgba(104, 203, 225, .16);
+    }
+    .hydro-readout strong { color: #a8ecfb; font-size: .76rem; }
+    .hydro-legend {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4px 8px;
+      font-size: .64rem;
+      color: rgba(255,255,255,.58);
+    }
+    .hydro-legend span { display: flex; align-items: center; gap: 5px; }
+    .hydro-swatch { width: 9px; height: 9px; border-radius: 2px; flex: 0 0 auto; }
     #mm-measure.active {
       background: linear-gradient(135deg, rgba(255,42,161,.34), rgba(154,29,117,.34));
       border-color: rgba(255, 107, 190, .48);
@@ -861,6 +896,20 @@
           </label>
         </div>
 
+        <div class="ctrl-section">
+          <div class="ctrl-section-title">Hydro intelligence</div>
+          <div class="hydro-readout">
+            <strong id="mm-hydro-status">1550A model loading…</strong>
+            <div class="tiny-note">Route warning logic: land or dark-blue water is a problem; light-blue, white water and small extraction gaps are treated as OK.</div>
+          </div>
+          <label class="ctrl-toggle"><input type="checkbox" id="mm-hydro-visible"> Show hydro zones</label>
+          <div class="hydro-legend" aria-label="Hydro intelligence legend">
+            <span><i class="hydro-swatch" style="background:#22a06b"></i>White / light blue / other: OK</span>
+            <span><i class="hydro-swatch" style="background:#ef4444"></i>Dark blue: shallow</span>
+            <span><i class="hydro-swatch" style="background:#111827"></i>Land: invalid</span>
+          </div>
+        </div>
+
         <!-- Detailed GPS warning text paused to keep the map controls compact.
         <div id="mm-gps-status" class="tiny-note" aria-live="polite"></div>
         -->
@@ -1122,6 +1171,7 @@
   </section>
 
   <!-- App JS -->
-  <script type="module" src="app.js?v=20260923-8"></script>
+  <script src="hydro/hydro_1550A.js?v=20260929-1"></script>
+  <script type="module" src="app.js?v=20260929-hydro2"></script>
 </body>
 </html>
