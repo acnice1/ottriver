@@ -683,31 +683,335 @@
       .brand-mark { display: none; }
       header h1 { font-size: 0.80rem; }
     }
+
+
+    /* =====================================================
+       Map-first left rail layout
+       ===================================================== */
+    :root { --rail-w: 52px; --topbar-h: 0px; }
+    header { display: none !important; }
+    body { min-height: 100dvh; }
+    #leaflet-map { height: 100dvh; }
+    #map.tab-content { height: 100dvh; }
+    .tab-content:not(#map) {
+      box-sizing: border-box;
+      max-width: none;
+      width: auto;
+      margin: 12px 12px 12px calc(var(--rail-w) + 12px);
+    }
+    .app-rail {
+      box-sizing: border-box;
+      position: fixed;
+      z-index: 5200;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: var(--rail-w);
+      padding: 8px 5px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      color: #edf7ff;
+      background: linear-gradient(180deg, rgba(5,21,36,.98), rgba(8,31,51,.97));
+      border-right: 1px solid rgba(255,255,255,.11);
+      box-shadow: 8px 0 26px rgba(2,16,28,.18);
+      overflow: visible;
+    }
+    .rail-spacer { flex: 1 1 auto; }
+    .app-rail .rail-btn {
+      appearance: none;
+      width: 42px;
+      height: 43px;
+      flex: 0 0 43px;
+      padding: 2px;
+      border: 1px solid transparent;
+      border-radius: 10px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 2px;
+      background: transparent;
+      color: rgba(222,239,250,.68);
+      cursor: pointer;
+      transition: .15s ease;
+    }
+    .app-rail .rail-btn:hover { background: rgba(255,255,255,.07); color: #fff; }
+    .app-rail .rail-btn.active,
+    .app-rail .rail-btn.compass-on {
+      background: rgba(49,166,215,.17);
+      border-color: rgba(92,197,235,.28);
+      color: #fff;
+    }
+    .rail-icon { font-size: 18px; line-height: 1; }
+    .rail-label { font-size: 8px; line-height: 1; font-weight: 800; letter-spacing: .025em; }
+    .map-flyout {
+      position: fixed;
+      z-index: 5150;
+      left: calc(var(--rail-w) + 8px);
+      top: 10px;
+      width: 270px;
+      box-sizing: border-box;
+      max-height: calc(100dvh - 20px);
+      overflow-y: auto;
+      display: none;
+      padding: 11px;
+      color: #edf7ff;
+      background: rgba(7,24,41,.94);
+      border: 1px solid rgba(255,255,255,.11);
+      border-radius: 14px;
+      box-shadow: 0 14px 34px rgba(0,0,0,.30);
+      backdrop-filter: blur(12px) saturate(120%);
+      -webkit-backdrop-filter: blur(12px) saturate(120%);
+      scrollbar-width: thin;
+    }
+    .map-flyout.open { display: grid; gap: 8px; }
+    body:not([data-active-tab="map"]) .map-flyout[data-flyout="boat"],
+    body:not([data-active-tab="map"]) .map-flyout[data-flyout="route"],
+    body:not([data-active-tab="map"]) .map-flyout[data-flyout="layers"] { display: none !important; }
+    .flyout-heading {
+      min-height: 38px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 1px 2px 3px;
+    }
+    .flyout-heading > div:first-child { display: grid; gap: 2px; }
+    .flyout-heading strong { font-size: .88rem; color: #fff; }
+    .flyout-heading span { font-size: .64rem; color: rgba(255,255,255,.52); }
+    .flyout-speed { display: flex !important; align-items: baseline; gap: 3px !important; white-space: nowrap; }
+    .flyout-speed #mm-speed { color: #fff; font-size: 1.42rem; font-weight: 850; font-variant-numeric: tabular-nums; }
+    .flyout-speed small { color: rgba(255,255,255,.55); font-size: .64rem; font-weight: 800; text-transform: uppercase; }
+    .map-flyout .ctrl-section { padding: 9px; }
+    .map-flyout button,
+    .map-flyout select,
+    .map-flyout input[type="number"] {
+      box-sizing: border-box;
+      min-height: 34px;
+      border: 1px solid rgba(255,255,255,.13);
+      border-radius: 9px;
+      background: rgba(255,255,255,.07);
+      color: #f4fbff;
+      font: inherit;
+      font-size: .76rem;
+      font-weight: 650;
+    }
+    .map-flyout button { width: 100%; padding: 7px 9px; cursor: pointer; }
+    .map-flyout button:hover,
+    .map-flyout select:hover,
+    .map-flyout input[type="number"]:hover { background: rgba(255,255,255,.12); border-color: rgba(126,216,244,.32); }
+    .map-flyout select { width: 100%; padding: 6px 7px; appearance: auto; }
+    .map-flyout select option { color: #111; background: #fff; }
+    .map-flyout input[type="number"] { width: 100%; padding: 6px 7px; }
+    .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .setting-field { display: grid; gap: 5px; min-width: 0; color: rgba(255,255,255,.70); font-size: .68rem; font-weight: 700; }
+    .marker-row { grid-template-columns: 1.15fr .85fr; }
+    .menu-list { display: grid; gap: 6px; }
+    .map-flyout .menu-tab {
+      min-height: 42px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      text-align: left;
+      background: rgba(255,255,255,.045);
+    }
+    .map-flyout .menu-tab span { color: rgba(255,255,255,.45); font-size: 1rem; }
+    .map-flyout .menu-tab.active { background: rgba(49,166,215,.18); border-color: rgba(92,197,235,.28); }
+    .map-brand-chip {
+      position: fixed;
+      z-index: 3100;
+      left: calc(var(--rail-w) + 12px);
+      top: 10px;
+      padding: 6px 10px;
+      border-radius: 9px;
+      color: #173148;
+      background: rgba(248,251,253,.88);
+      border: 1px solid rgba(17,46,68,.12);
+      box-shadow: 0 4px 14px rgba(18,44,62,.08);
+      backdrop-filter: blur(7px);
+      -webkit-backdrop-filter: blur(7px);
+      font-size: .72rem;
+      font-weight: 800;
+      pointer-events: none;
+    }
+    body:not([data-active-tab="map"]) .map-brand-chip { display: none; }
+    .floating-compass { left: calc(var(--rail-w) + 20px); top: 56px; }
+    .maplibregl-ctrl-top-right { top: 4px; right: 4px; }
+    .maplibregl-ctrl-bottom-left { left: var(--rail-w); }
+    .maplibregl-ctrl-bottom-right { right: 4px; }
+    @media (max-width: 640px) {
+      :root { --rail-w: 48px; }
+      .app-rail { padding-inline: 4px; }
+      .app-rail .rail-btn { width: 38px; height: 41px; flex-basis: 41px; }
+      .rail-label { display: none; }
+      .map-flyout { left: calc(var(--rail-w) + 6px); width: min(270px, calc(100vw - var(--rail-w) - 16px)); }
+      .tab-content:not(#map) { margin-left: calc(var(--rail-w) + 8px); margin-right: 8px; }
+      .map-brand-chip { left: calc(var(--rail-w) + 8px); }
+      .settings-grid { grid-template-columns: 1fr; }
+    }
+
   </style>
 </head>
 <body>
 
-  <header>
-    <div class="topbar-inner">
-      <div class="brand">
-        <div class="brand-mark" aria-hidden="true">⛵</div>
-        <div class="brand-copy">
-          <span class="eyebrow">Ottawa River</span>
-          <h1>Ottawa Sail Navigator</h1>
+  <!-- Map-first navigation rail -->
+  <nav id="app-rail" class="app-rail" aria-label="Primary navigation">
+    <button class="rail-btn active" type="button" data-map-panel="boat" aria-controls="rail-panel-boat" aria-expanded="true">
+      <span class="rail-icon" aria-hidden="true">◎</span><span class="rail-label">Boat</span>
+    </button>
+    <button class="rail-btn" type="button" data-map-panel="route" aria-controls="rail-panel-route" aria-expanded="false">
+      <span class="rail-icon" aria-hidden="true">↗</span><span class="rail-label">Route</span>
+    </button>
+    <button class="rail-btn" type="button" data-map-panel="layers" aria-controls="rail-panel-layers" aria-expanded="false">
+      <span class="rail-icon" aria-hidden="true">▱</span><span class="rail-label">Layers</span>
+    </button>
+    <button class="rail-btn compass-on" id="mm-show-compass" type="button" aria-pressed="true" aria-label="Hide compass">
+      <span class="rail-icon" aria-hidden="true">⊙</span><span class="rail-label">Compass</span>
+    </button>
+    <button class="rail-btn" type="button" data-map-panel="more" aria-controls="rail-panel-more" aria-expanded="false">
+      <span class="rail-icon" aria-hidden="true">⋯</span><span class="rail-label">More</span>
+    </button>
+    <span class="rail-spacer" aria-hidden="true"></span>
+    <button class="rail-btn" type="button" data-map-panel="settings" aria-controls="rail-panel-settings" aria-expanded="false">
+      <span class="rail-icon" aria-hidden="true">⚙</span><span class="rail-label">Settings</span>
+    </button>
+
+    <section class="map-flyout open" id="rail-panel-boat" data-flyout="boat" aria-label="Boat and GPS controls">
+      <div class="flyout-heading"><div><strong>Boat / GPS</strong><span>Live navigation and trip controls</span></div><div class="flyout-speed"><span id="mm-speed">—</span><small>kn</small></div></div>
+      <div class="ctrl-section">
+        <div class="ctrl-section-title">Navigation</div>
+        <div class="ctrl-row">
+          <button id="mm-startgps" class="ctrl-action-primary" type="button">Start GPS</button>
+          <button id="mm-recenter" type="button">Recenter</button>
+        </div>
+        <div class="ctrl-row">
+          <label class="ctrl-toggle"><input type="checkbox" id="mm-follow" checked> Follow</label>
+          <label class="ctrl-toggle"><input type="checkbox" id="mm-courseup"> Course-up</label>
+        </div>
+        <button id="mm-snapnorth" type="button">North up</button>
+      </div>
+
+      <div class="ctrl-section">
+        <div class="ctrl-section-title">Current trip</div>
+        <div class="track-readout">
+          <span class="track-main-label">Distance</span>
+          <span id="mm-track-distance" class="track-distance">0.00 NM</span>
+          <div class="track-metrics">
+            <div class="track-metric"><span class="k">Elapsed</span><span id="mm-track-time" class="v">0m</span></div>
+            <div class="track-metric"><span class="k">Average</span><span id="mm-track-avg" class="v">0.0 kn</span></div>
+            <div class="track-metric"><span class="k">Maximum</span><span id="mm-track-max" class="v">0.0 kn</span></div>
+          </div>
+        </div>
+        <label class="ctrl-toggle"><input type="checkbox" id="mm-trail-recording" checked> Recording</label>
+        <div class="ctrl-row">
+          <button id="mm-newtrip" type="button">New trip</button>
+          <button id="mm-cleartrail" type="button">Clear history</button>
+        </div>
+        <button id="mm-exportgpx" type="button">Export GPX</button>
+        <div id="mm-stats" class="tiny-note"></div>
+      </div>
+    </section>
+
+    <section class="map-flyout" id="rail-panel-route" data-flyout="route" aria-label="Route controls">
+      <div class="flyout-heading"><div><strong>Route</strong><span>Plan, edit and assess the route</span></div></div>
+      <div class="ctrl-section">
+        <div class="measure-readout">
+          <span class="measure-label">Planned route</span>
+          <span id="mm-measure-value" class="measure-value">0.00 NM</span>
+          <div class="route-substats">
+            <span id="mm-route-count">0 legs</span>
+            <span id="mm-route-eta">ETA —</span>
+          </div>
+        </div>
+        <div class="ctrl-row">
+          <button id="mm-measure" class="ctrl-action-primary" type="button">Start route</button>
+          <button id="mm-route-undo" type="button">Undo point</button>
+        </div>
+        <div class="ctrl-row">
+          <button id="mm-route-reverse" type="button">Reverse</button>
+          <button id="mm-measure-clear" type="button">Clear route</button>
+        </div>
+        <div id="mm-route-legs" class="route-legs" aria-live="polite"></div>
+        <div class="tiny-note">Tap the map to add waypoints. Drag numbered waypoints to refine the route.</div>
+      </div>
+    </section>
+
+    <section class="map-flyout" id="rail-panel-layers" data-flyout="layers" aria-label="Map layers">
+      <div class="flyout-heading"><div><strong>Layers</strong><span>Map information used while underway</span></div></div>
+      <div class="ctrl-section">
+        <div class="ctrl-section-title">Chart</div>
+        <label class="opacity-control" for="mm-chart-opacity">
+          <span>Overlay opacity</span>
+          <span id="mm-chart-opacity-value" class="opacity-value">98%</span>
+          <input id="mm-chart-opacity" type="range" min="0" max="100" step="1" value="98" aria-label="Marine chart opacity">
+        </label>
+      </div>
+      <div class="ctrl-section">
+        <div class="ctrl-section-title">Hydro intelligence</div>
+        <div class="hydro-readout">
+          <strong id="mm-hydro-status">1550A model loading…</strong>
+          <div class="tiny-note">Land is invalid. Dark-blue shallow water and non-buoy hazards use the safety distances in Settings.</div>
+        </div>
+        <label class="ctrl-toggle"><input type="checkbox" id="mm-hydro-visible"> Show hydro zones</label>
+        <div class="hydro-legend" aria-label="Hydro intelligence legend">
+          <span><i class="hydro-swatch" style="background:#ef4444"></i>In shallow / land</span>
+          <span><i class="hydro-swatch" style="background:#f59e0b"></i>Near shallow</span>
+          <span><i class="hydro-swatch" style="background:#ef4444"></i>Hazards</span>
+          <span><i class="hydro-swatch" style="background:#22c55e"></i>Red/green buoys exempt</span>
         </div>
       </div>
-      <nav aria-label="Primary">
-        <button type="button" id="forecast-tab" class="active" data-tab="forecast" aria-controls="forecast" aria-selected="true">Weather</button>
-        <button type="button" data-tab="radar" aria-controls="radar">Radar</button>
-        <button type="button" data-tab="map" aria-controls="map">Charts</button>
-        <button type="button" data-tab="info" aria-controls="info">Reference</button>
-        <button type="button" data-tab="emergency" aria-controls="emergency">Safety</button>
-      </nav>
-    </div>
-  </header>
+      <div class="ctrl-section">
+        <div class="ctrl-section-title">Track</div>
+        <label class="ctrl-toggle"><input type="checkbox" id="mm-trail-visible" checked> Show sailed track</label>
+      </div>
+      <div class="ctrl-section">
+        <div class="ctrl-section-title">Markers</div>
+        <div class="ctrl-row marker-row">
+          <select id="mm-marker-type" aria-label="Marker type">
+            <option value="warn">🔴 Warning</option>
+            <option value="fish">🟢 Fish</option>
+            <option value="other">🟡 Other</option>
+          </select>
+          <button id="mm-drop-marker" type="button">Drop marker</button>
+        </div>
+        <div class="tiny-note">Choose a type, then tap the map.</div>
+      </div>
+    </section>
+
+    <section class="map-flyout" id="rail-panel-more" data-flyout="more" aria-label="Other pages">
+      <div class="flyout-heading"><div><strong>More</strong><span>Weather, reference and safety pages</span></div></div>
+      <div class="menu-list">
+        <button type="button" id="forecast-tab" class="menu-tab" data-tab="forecast" aria-controls="forecast">Weather <span>›</span></button>
+        <button type="button" class="menu-tab" data-tab="radar" aria-controls="radar">Radar <span>›</span></button>
+        <button type="button" class="menu-tab" data-tab="info" aria-controls="info">Reference <span>›</span></button>
+        <button type="button" class="menu-tab" data-tab="emergency" aria-controls="emergency">Safety <span>›</span></button>
+      </div>
+    </section>
+
+    <section class="map-flyout" id="rail-panel-settings" data-flyout="settings" aria-label="Map settings">
+      <div class="flyout-heading"><div><strong>Settings</strong><span>Preferences you normally set and leave alone</span></div></div>
+      <div class="ctrl-section">
+        <div class="ctrl-section-title">Route defaults</div>
+        <div class="settings-grid">
+          <label class="setting-field"><span>Distance units</span><select id="mm-measure-unit" aria-label="Route distance unit"><option value="nm">NM</option><option value="km">km</option><option value="mi">miles</option></select></label>
+          <label class="setting-field"><span>Boat speed (kn)</span><input id="mm-route-speed" type="number" min="0.5" max="15" step="0.1" value="4.5" inputmode="decimal"></label>
+        </div>
+      </div>
+      <div class="ctrl-section">
+        <div class="ctrl-section-title">Hydro safety</div>
+        <div class="settings-grid">
+          <label class="setting-field"><span>Shallow buffer (m)</span><input id="mm-shallow-buffer" type="number" min="1" max="100" step="1" value="10" inputmode="numeric"></label>
+          <label class="setting-field"><span>Hazard buffer (m)</span><input id="mm-hazard-buffer" type="number" min="1" max="200" step="1" value="20" inputmode="numeric"></label>
+        </div>
+        <div class="tiny-note">Red and green lateral buoys remain exempt from the point-hazard buffer.</div>
+      </div>
+    </section>
+  </nav>
 
   <!-- Forecast Tab -->
-  <section id="forecast" class="tab-content active" role="region" aria-labelledby="forecast-tab" data-forecast-build="20260924-1">
+  <section id="forecast" class="tab-content" role="region" aria-labelledby="forecast-tab" data-forecast-build="20260924-1">
     <div class="forecast-layout">
       <div class="forecast-main">
         <article class="forecast-card">
@@ -818,8 +1122,9 @@
   </section>
 
   <!-- Marine Map Tab -->
-  <section id="map" class="tab-content" role="region" aria-labelledby="map-tab">
+  <section id="map" class="tab-content active" role="region" aria-labelledby="map-tab">
     <div id="leaflet-map" aria-label="Marine Map"></div>
+    <div class="map-brand-chip" aria-hidden="true">Ottawa Sail Navigator</div>
 
     <!-- Draggable detailed compass -->
     <div class="floating-compass" id="mm-detailed-compass" aria-label="Detailed heading compass">
@@ -855,136 +1160,6 @@
             <button id="mm-wind-clear" class="wind-clear-btn" type="button">Clear</button>
           </div>
           <div class="wind-hint">Tap the compass face to set wind direction.</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Floating controls -->
-    <div class="leaflet-ctrl collapsed" id="mm-panel">
-      <div class="ctrl-header" id="mm-toggle" aria-expanded="false">
-        <div class="compass" title="Heading">
-          <div class="north">N</div>
-          <div class="needle" id="mm-needle"></div>
-          <div class="tail"></div>
-        </div>
-        <div class="speed"><span id="mm-speed">—</span><span class="units"> kn</span></div>
-        <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
-          <path d="M8 10l4 4 4-4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
-      </div>
-
-      <div class="ctrl-body">
-        <div class="ctrl-section">
-          <div class="ctrl-section-title">Navigation</div>
-          <div class="ctrl-row">
-            <button id="mm-startgps" class="ctrl-action-primary" type="button">Start GPS</button>
-            <button id="mm-recenter" type="button">Recenter</button>
-          </div>
-          <div class="ctrl-row">
-            <label class="ctrl-toggle"><input type="checkbox" id="mm-follow" checked> Follow</label>
-            <label class="ctrl-toggle"><input type="checkbox" id="mm-courseup"> Course-up</label>
-          </div>
-          <button id="mm-show-compass" type="button">Show compass</button>
-        </div>
-
-        <div class="ctrl-section">
-          <div class="ctrl-section-title">Chart</div>
-          <label class="opacity-control" for="mm-chart-opacity">
-            <span>Overlay opacity</span>
-            <span id="mm-chart-opacity-value" class="opacity-value">98%</span>
-            <input id="mm-chart-opacity" type="range" min="0" max="100" step="1" value="98" aria-label="Marine chart opacity">
-          </label>
-        </div>
-
-        <div class="ctrl-section">
-          <div class="ctrl-section-title">Hydro intelligence</div>
-          <div class="hydro-readout">
-            <strong id="mm-hydro-status">1550A model loading…</strong>
-            <div class="tiny-note">Route warning logic: avoid land and stay at least 10 m from dark-blue shallow water and non-buoy hazards. Red/green buoys are exempt from the 10 m hazard rule.</div>
-          </div>
-          <label class="ctrl-toggle"><input type="checkbox" id="mm-hydro-visible"> Show hydro zones</label>
-          <div class="hydro-legend" aria-label="Hydro intelligence legend">
-            <span><i class="hydro-swatch" style="background:#ef4444"></i>Dark blue: shallow</span>
-            <span><i class="hydro-swatch" style="background:#ef4444"></i>Land: invalid</span>
-            <span><i class="hydro-swatch" style="background:#f59e0b"></i>Hazards: 10 m</span>
-            <span><i class="hydro-swatch" style="background:#22c55e"></i>Red/green buoys: exempt</span>
-          </div>
-        </div>
-
-        <!-- Detailed GPS warning text paused to keep the map controls compact.
-        <div id="mm-gps-status" class="tiny-note" aria-live="polite"></div>
-        -->
-
-        <div class="ctrl-section">
-          <div class="ctrl-section-title">Route</div>
-          <div class="measure-readout">
-            <span class="measure-label">Planned route</span>
-            <span id="mm-measure-value" class="measure-value">0.00 NM</span>
-            <div class="route-substats">
-              <span id="mm-route-count">0 legs</span>
-              <span id="mm-route-eta">ETA —</span>
-            </div>
-          </div>
-          <div class="ctrl-row">
-            <button id="mm-measure" type="button">Start route</button>
-            <select id="mm-measure-unit" aria-label="Route distance unit">
-              <option value="nm">NM</option>
-              <option value="km">km</option>
-              <option value="mi">miles</option>
-            </select>
-          </div>
-          <div class="route-speed-row">
-            <label for="mm-route-speed">Assumed boat speed (kn)</label>
-            <input id="mm-route-speed" type="number" min="0.5" max="15" step="0.1" value="4.5" inputmode="decimal">
-          </div>
-          <div class="ctrl-row">
-            <button id="mm-route-undo" type="button">Undo point</button>
-            <button id="mm-route-reverse" type="button">Reverse</button>
-          </div>
-          <button id="mm-measure-clear" type="button">Clear route</button>
-          <div id="mm-route-legs" class="route-legs" aria-live="polite"></div>
-          <div class="tiny-note">Tap the map to add waypoints. Drag numbered waypoints to refine the route.</div>
-        </div>
-
-        <div class="ctrl-section">
-          <div class="ctrl-section-title">Track</div>
-          <div class="track-readout">
-            <span class="track-main-label">Current trip</span>
-            <span id="mm-track-distance" class="track-distance">0.00 NM</span>
-            <div class="track-metrics">
-              <div class="track-metric"><span class="k">Elapsed</span><span id="mm-track-time" class="v">0m</span></div>
-              <div class="track-metric"><span class="k">Average</span><span id="mm-track-avg" class="v">0.0 kn</span></div>
-              <div class="track-metric"><span class="k">Maximum</span><span id="mm-track-max" class="v">0.0 kn</span></div>
-            </div>
-          </div>
-          <div class="ctrl-row">
-            <label class="ctrl-toggle"><input type="checkbox" id="mm-trail-recording" checked> Recording</label>
-            <label class="ctrl-toggle"><input type="checkbox" id="mm-trail-visible" checked> Show track</label>
-          </div>
-          <div class="ctrl-row">
-            <button id="mm-newtrip" type="button">New trip</button>
-            <button id="mm-cleartrail" type="button">Clear history</button>
-          </div>
-          <button id="mm-exportgpx" type="button">Export GPX</button>
-          <div id="mm-stats" class="tiny-note"></div>
-        </div>
-
-        <div class="ctrl-section">
-          <div class="ctrl-section-title">Markers</div>
-          <div class="ctrl-row">
-            <select id="mm-marker-type" aria-label="Marker type">
-              <option value="warn">🔴 Warning</option>
-              <option value="fish">🟢 Fish</option>
-              <option value="other">🟡 Other</option>
-            </select>
-            <button id="mm-drop-marker" type="button">Drop marker</button>
-          </div>
-          <div class="tiny-note">Choose a type, then tap the map.</div>
-        </div>
-
-        <div class="ctrl-section">
-          <div class="ctrl-section-title">Tools</div>
-          <button id="mm-snapnorth" type="button">North up</button>
         </div>
       </div>
     </div>
@@ -1173,6 +1348,6 @@
 
   <!-- App JS -->
   <script src="hydro/hydro_1550A.js?v=20260929-2"></script>
-  <script type="module" src="app.js?v=20260929-hazards10"></script>
+  <script type="module" src="app.js?v=20260929-left-rail"></script>
 </body>
 </html>

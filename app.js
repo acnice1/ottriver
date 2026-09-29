@@ -75,6 +75,8 @@ const LS_ROUTE_SPEED = "sailRouteSpeedKts_v1";
 const LS_TRAIL_RECORDING = "sailTrailRecording_v1";
 const LS_TRAIL_VISIBLE = "sailTrailVisible_v1";
 const LS_HYDRO_VISIBLE = "sailHydroVisible_v1";
+const LS_SHALLOW_BUFFER = "sailShallowBufferM_v1";
+const LS_HAZARD_BUFFER = "sailHazardBufferM_v1";
 
 /* ===== EMA helpers (explicit position & speed EMAs) ===== */
 const makeEma = (alpha) => (current, prev) =>
@@ -93,14 +95,9 @@ let windBearing = (() => {
    CSS offset for floating map panel
    ========================================================= */
 function adjustPanelOffset() {
-  const header = document.querySelector("header");
-  const nav = document.querySelector("nav");
-  const headerH = header ? header.offsetHeight : 0;
-  const navH = nav ? nav.offsetHeight : 0;
-  // Nav now sits inside the header app bar; avoid counting its height twice.
-  const topbarH = header && nav && header.contains(nav) ? headerH : headerH + navH;
-  document.documentElement.style.setProperty("--nav-h", `${navH}px`);
-  document.documentElement.style.setProperty("--topbar-h", `${topbarH}px`);
+  // The primary navigation is now a vertical rail, so it consumes no map height.
+  document.documentElement.style.setProperty("--nav-h", "0px");
+  document.documentElement.style.setProperty("--topbar-h", "0px");
 }
 window.addEventListener("resize", adjustPanelOffset);
 window.addEventListener("orientationchange", adjustPanelOffset);
@@ -118,6 +115,18 @@ if ("serviceWorker" in navigator) {
 /* =========================================================
    Tabs & collapsibles (robust + simple)
    ========================================================= */
+function closeMapFlyouts(except = null) {
+  $all(".map-flyout.open").forEach((panel) => {
+    if (except && panel.dataset.flyout === except) return;
+    panel.classList.remove("open");
+  });
+  $all("#app-rail [data-map-panel]").forEach((btn) => {
+    const keep = except && btn.dataset.mapPanel === except;
+    btn.classList.toggle("active", !!keep);
+    btn.setAttribute("aria-expanded", keep ? "true" : "false");
+  });
+}
+
 function showTab(tabId, btnEl) {
   const id = String(tabId || "").replace(/^#/, "");
   const tab = document.getElementById(id);
@@ -127,38 +136,70 @@ function showTab(tabId, btnEl) {
     .querySelectorAll(".tab-content.active")
     .forEach((t) => t.classList.remove("active"));
   document
-    .querySelectorAll("nav [data-tab].active, nav a.active")
+    .querySelectorAll("#app-rail [data-tab].active")
     .forEach((b) => b.classList.remove("active"));
 
   tab.classList.add("active");
+  document.body.dataset.activeTab = id;
   if (btnEl) btnEl.classList.add("active");
 
   if (id === "map") {
     initMarineMapOnce();
     adjustPanelOffset();
     if (mmMap) mmMap.resize();
+  } else {
+    closeMapFlyouts();
   }
 }
 
+function setupMapRail() {
+  const rail = $("#app-rail");
+  if (!rail) return;
+  const panelButtons = $all("#app-rail [data-map-panel]");
+
+  panelButtons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const name = btn.dataset.mapPanel;
+      const panel = document.querySelector(`.map-flyout[data-flyout="${name}"]`);
+      if (!panel) return;
+      const isOpen = panel.classList.contains("open");
+
+      // Boat, Route and Layers are map-operating controls. Selecting them from
+      // another page returns to Charts automatically.
+      if (["boat", "route", "layers"].includes(name) && !$("#map")?.classList.contains("active")) {
+        showTab("map", null);
+      }
+
+      closeMapFlyouts();
+      if (!isOpen) {
+        panel.classList.add("open");
+        btn.classList.add("active");
+        btn.setAttribute("aria-expanded", "true");
+      }
+    });
+  });
+
+  // Compass is a direct control, not a flyout. If used from another page,
+  // return to Charts first; setupFloatingCompass owns the visibility toggle.
+  $("#mm-show-compass")?.addEventListener("click", () => {
+    if (!$("#map")?.classList.contains("active")) showTab("map", null);
+  });
+}
+
 function bindTabsAndCollapsibles() {
-  const nav = document.querySelector("nav");
-  if (nav) {
-    nav.addEventListener("click", (e) => {
+  const rail = $("#app-rail");
+  if (rail) {
+    rail.addEventListener("click", (e) => {
       const t = e.target;
-      const el =
-        t instanceof Element ? t.closest('[data-tab], a[href^="#"]') : null;
-      if (!el || !nav.contains(el)) return;
+      const el = t instanceof Element ? t.closest("[data-tab]") : null;
+      if (!el || !rail.contains(el)) return;
       e.preventDefault();
-      const tabId = el.dataset.tab || el.getAttribute("href");
-      showTab(tabId, el);
+      showTab(el.dataset.tab, el);
     });
 
-    nav.addEventListener("keydown", (e) => {
-      if (
-        (e.key === "Enter" || e.key === " ") &&
-        e.target instanceof Element &&
-        e.target.closest('[data-tab], a[href^="#"]')
-      ) {
+    rail.addEventListener("keydown", (e) => {
+      if ((e.key === "Enter" || e.key === " ") &&
+          e.target instanceof Element && e.target.closest("[data-tab]")) {
         e.preventDefault();
         e.target.click();
       }
@@ -169,23 +210,12 @@ function bindTabsAndCollapsibles() {
     btn.addEventListener("click", () => {
       btn.classList.toggle("active");
       const content = btn.nextElementSibling;
-      if (content)
-        content.style.display =
-          content.style.display === "block" ? "none" : "block";
-      adjustPanelOffset(); // keep panel positioned if height changes
+      if (content) content.style.display = content.style.display === "block" ? "none" : "block";
     });
   });
 
-  // initial tab
-  const activeNav = document.querySelector(
-    "nav [data-tab].active, nav a.active"
-  );
-  if (activeNav) {
-    showTab(activeNav.dataset.tab || activeNav.getAttribute("href"), activeNav);
-  } else {
-    const first = document.querySelector('nav [data-tab], nav a[href^="#"]');
-    if (first) showTab(first.dataset.tab || first.getAttribute("href"), first);
-  }
+  // Charts is now the primary/default page.
+  showTab("map", null);
 }
 
 /* =========================================================
@@ -441,11 +471,10 @@ let routeSpeedKts = parseFloat(localStorage.getItem(LS_ROUTE_SPEED) || "4.5") ||
 let routeWaypointMarkers = [];
 let routeHydroAssessments = [];
 let hydroVisible = localStorage.getItem(LS_HYDRO_VISIBLE) === "true";
+let shallowBufferM = Math.min(100, Math.max(1, parseFloat(localStorage.getItem(LS_SHALLOW_BUFFER) || "10") || 10));
+let hazardBufferM = Math.min(200, Math.max(1, parseFloat(localStorage.getItem(LS_HAZARD_BUFFER) || "20") || 20));
 let hydroIndex = null;
 const HYDRO_GRID_DEG = 0.0125;
-const HYDRO_SAMPLE_MIN_M = 5;
-const HYDRO_SAMPLE_MAX_M = 6;
-const HYDRO_SAMPLE_TARGET = 1000;
 
 // MapLibre DOM markers we add (keeps API simple)
 let markersLayer = [];
@@ -695,8 +724,9 @@ function setupFloatingCompass() {
   const syncCompassToggleLabel = () => {
     if (!showBtn) return;
     const hidden = panel.classList.contains("hidden");
-    showBtn.textContent = hidden ? "Show compass" : "Hide compass";
+    showBtn.classList.toggle("compass-on", !hidden);
     showBtn.setAttribute("aria-pressed", hidden ? "false" : "true");
+    showBtn.setAttribute("aria-label", hidden ? "Show compass" : "Hide compass");
   };
 
   try {
@@ -712,7 +742,9 @@ function setupFloatingCompass() {
   const clampToViewport = () => {
     const rect = panel.getBoundingClientRect();
     const minTop = Math.max(6, parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--topbar-h")) || 0);
-    const left = Math.min(Math.max(6, rect.left), Math.max(6, window.innerWidth - rect.width - 6));
+    const railW = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--rail-w")) || 0;
+    const minLeft = railW + 8;
+    const left = Math.min(Math.max(minLeft, rect.left), Math.max(minLeft, window.innerWidth - rect.width - 6));
     const top = Math.min(Math.max(minTop + 6, rect.top), Math.max(minTop + 6, window.innerHeight - rect.height - 6));
     panel.style.left = `${left}px`;
     panel.style.top = `${top}px`;
@@ -1395,9 +1427,10 @@ function toggleCourseUp(on) {
 
 /* =========================================================
    Hydro intelligence — 1550A
-   Land is a hard invalid route. Dark-blue shallow water has a 10 m safety
-   envelope. Point hazards also have a 10 m exclusion radius, except red and
-   green buoys. Data loads from hydro_1550A.js
+   Land is a hard invalid route. Dark-blue shallow water is checked directly,
+   and closest route-to-boundary distance is used for the configured caution zone.
+   Point hazards have a configurable exclusion
+   radius, except red and green buoys. Data loads from hydro_1550A.js
    so it also works when the app is opened from file://.
    ========================================================= */
 function hydroFlattenParts(fc) {
@@ -1475,13 +1508,177 @@ function hydroPointInLayer(layer, x, y) {
   return false;
 }
 
+
+function hydroOrient(ax, ay, bx, by, cx, cy) {
+  return (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+}
+
+function hydroOnSegment(ax, ay, bx, by, px, py) {
+  const eps = 1e-12;
+  return px >= Math.min(ax, bx) - eps && px <= Math.max(ax, bx) + eps &&
+         py >= Math.min(ay, by) - eps && py <= Math.max(ay, by) + eps;
+}
+
+function hydroSegmentsIntersect(a1, a2, b1, b2) {
+  const o1 = hydroOrient(a1[0], a1[1], a2[0], a2[1], b1[0], b1[1]);
+  const o2 = hydroOrient(a1[0], a1[1], a2[0], a2[1], b2[0], b2[1]);
+  const o3 = hydroOrient(b1[0], b1[1], b2[0], b2[1], a1[0], a1[1]);
+  const o4 = hydroOrient(b1[0], b1[1], b2[0], b2[1], a2[0], a2[1]);
+  const eps = 1e-12;
+  if (((o1 > eps && o2 < -eps) || (o1 < -eps && o2 > eps)) &&
+      ((o3 > eps && o4 < -eps) || (o3 < -eps && o4 > eps))) return true;
+  if (Math.abs(o1) <= eps && hydroOnSegment(a1[0], a1[1], a2[0], a2[1], b1[0], b1[1])) return true;
+  if (Math.abs(o2) <= eps && hydroOnSegment(a1[0], a1[1], a2[0], a2[1], b2[0], b2[1])) return true;
+  if (Math.abs(o3) <= eps && hydroOnSegment(b1[0], b1[1], b2[0], b2[1], a1[0], a1[1])) return true;
+  if (Math.abs(o4) <= eps && hydroOnSegment(b1[0], b1[1], b2[0], b2[1], a2[0], a2[1])) return true;
+  return false;
+}
+
+function hydroPartIntersectsSegment(part, a, b) {
+  const minX = Math.min(a.lng, b.lng), maxX = Math.max(a.lng, b.lng);
+  const minY = Math.min(a.lat, b.lat), maxY = Math.max(a.lat, b.lat);
+  const [pMinX, pMinY, pMaxX, pMaxY] = part.bbox;
+  if (maxX < pMinX || minX > pMaxX || maxY < pMinY || minY > pMaxY) return false;
+  if (hydroPointInPart(a.lng, a.lat, part) || hydroPointInPart(b.lng, b.lat, part)) return true;
+  const segA = [a.lng, a.lat], segB = [b.lng, b.lat];
+  for (const ring of part.rings) {
+    for (let i = 1; i < ring.length; i++) {
+      if (hydroSegmentsIntersect(segA, segB, ring[i - 1], ring[i])) return true;
+    }
+  }
+  return false;
+}
+
+function hydroRouteIntersectsLayer(layer, a, b) {
+  if (!layer) return false;
+  const minX = Math.min(a.lng, b.lng), maxX = Math.max(a.lng, b.lng);
+  const minY = Math.min(a.lat, b.lat), maxY = Math.max(a.lat, b.lat);
+  const x0 = Math.floor(minX / HYDRO_GRID_DEG), x1 = Math.floor(maxX / HYDRO_GRID_DEG);
+  const y0 = Math.floor(minY / HYDRO_GRID_DEG), y1 = Math.floor(maxY / HYDRO_GRID_DEG);
+  const seen = new Set();
+  for (let ix = x0; ix <= x1; ix++) {
+    for (let iy = y0; iy <= y1; iy++) {
+      const bucket = layer.grid.get(`${ix},${iy}`) || [];
+      for (const idx of bucket) {
+        if (seen.has(idx)) continue;
+        seen.add(idx);
+        if (hydroPartIntersectsSegment(layer.parts[idx], a, b)) return true;
+      }
+    }
+  }
+  return false;
+}
+
+function hydroBuildBoundaryIndex(fc) {
+  const segments = [];
+  const grid = new Map();
+
+  function addSegment(a, b) {
+    if (!a || !b || a.length < 2 || b.length < 2) return;
+    const minX = Math.min(a[0], b[0]), minY = Math.min(a[1], b[1]);
+    const maxX = Math.max(a[0], b[0]), maxY = Math.max(a[1], b[1]);
+    const idx = segments.length;
+    segments.push({ a, b, bbox: [minX, minY, maxX, maxY] });
+    const x0 = Math.floor(minX / HYDRO_GRID_DEG), x1 = Math.floor(maxX / HYDRO_GRID_DEG);
+    const y0 = Math.floor(minY / HYDRO_GRID_DEG), y1 = Math.floor(maxY / HYDRO_GRID_DEG);
+    for (let ix = x0; ix <= x1; ix++) {
+      for (let iy = y0; iy <= y1; iy++) {
+        const key = `${ix},${iy}`;
+        let bucket = grid.get(key);
+        if (!bucket) grid.set(key, bucket = []);
+        bucket.push(idx);
+      }
+    }
+  }
+
+  for (const feature of fc?.features || []) {
+    const g = feature?.geometry;
+    if (!g) continue;
+    const polys = g.type === "Polygon" ? [g.coordinates] :
+      (g.type === "MultiPolygon" ? g.coordinates : []);
+    for (const rings of polys) {
+      for (const ring of rings || []) {
+        if (!ring || ring.length < 2) continue;
+        for (let i = 1; i < ring.length; i++) addSegment(ring[i - 1], ring[i]);
+        const first = ring[0], last = ring[ring.length - 1];
+        if (first && last && (first[0] !== last[0] || first[1] !== last[1])) addSegment(last, first);
+      }
+    }
+  }
+  return { segments, grid };
+}
+
+function hydroSegmentDistanceMeters(a, b, c, d) {
+  const latRef = (a.lat + b.lat + c[1] + d[1]) / 4;
+  const mLat = 111320;
+  const mLng = 111320 * Math.cos(latRef * Math.PI / 180);
+  const lon0 = (a.lng + b.lng + c[0] + d[0]) / 4;
+  const lat0 = latRef;
+  const A = [(a.lng - lon0) * mLng, (a.lat - lat0) * mLat];
+  const B = [(b.lng - lon0) * mLng, (b.lat - lat0) * mLat];
+  const C = [(c[0] - lon0) * mLng, (c[1] - lat0) * mLat];
+  const D = [(d[0] - lon0) * mLng, (d[1] - lat0) * mLat];
+
+  if (hydroSegmentsIntersect(A, B, C, D)) return 0;
+
+  const pointSeg = (P, X, Y) => {
+    const dx = Y[0] - X[0], dy = Y[1] - X[1];
+    const denom = dx * dx + dy * dy;
+    const t = denom > 0
+      ? Math.max(0, Math.min(1, ((P[0] - X[0]) * dx + (P[1] - X[1]) * dy) / denom))
+      : 0;
+    const qx = X[0] + t * dx, qy = X[1] + t * dy;
+    return Math.hypot(P[0] - qx, P[1] - qy);
+  };
+
+  return Math.min(
+    pointSeg(A, C, D),
+    pointSeg(B, C, D),
+    pointSeg(C, A, B),
+    pointSeg(D, A, B)
+  );
+}
+
+function hydroRouteBoundaryDistanceMeters(boundary, a, b, searchRadiusM = 10) {
+  if (!boundary) return Infinity;
+  const latRef = (a.lat + b.lat) / 2;
+  const latPad = searchRadiusM / 111320;
+  const cosLat = Math.max(0.15, Math.cos(latRef * Math.PI / 180));
+  const lngPad = searchRadiusM / (111320 * cosLat);
+  const minX = Math.min(a.lng, b.lng) - lngPad;
+  const maxX = Math.max(a.lng, b.lng) + lngPad;
+  const minY = Math.min(a.lat, b.lat) - latPad;
+  const maxY = Math.max(a.lat, b.lat) + latPad;
+  const x0 = Math.floor(minX / HYDRO_GRID_DEG), x1 = Math.floor(maxX / HYDRO_GRID_DEG);
+  const y0 = Math.floor(minY / HYDRO_GRID_DEG), y1 = Math.floor(maxY / HYDRO_GRID_DEG);
+
+  let best = Infinity;
+  const seen = new Set();
+  for (let ix = x0; ix <= x1; ix++) {
+    for (let iy = y0; iy <= y1; iy++) {
+      const bucket = boundary.grid.get(`${ix},${iy}`) || [];
+      for (const idx of bucket) {
+        if (seen.has(idx)) continue;
+        seen.add(idx);
+        const seg = boundary.segments[idx];
+        const [sMinX, sMinY, sMaxX, sMaxY] = seg.bbox;
+        if (sMaxX < minX || sMinX > maxX || sMaxY < minY || sMinY > maxY) continue;
+        const d = hydroSegmentDistanceMeters(a, b, seg.a, seg.b);
+        if (d < best) best = d;
+        if (best <= 0.01) return 0;
+      }
+    }
+  }
+  return best;
+}
+
 function ensureHydroIndex() {
   if (hydroIndex) return hydroIndex;
   const h = window.HYDRO_1550A;
   if (!h?.dark || !h?.land) return null;
   hydroIndex = {
     dark: hydroBuildLayerIndex(h.dark),
-    dark10: hydroBuildLayerIndex(h.dark10 || h.dark),
+    darkBoundary: hydroBuildBoundaryIndex(h.dark),
     land: hydroBuildLayerIndex(h.land),
     hazards: (h.hazards?.features || []).filter((f) => f?.geometry?.type === "Point"),
   };
@@ -1494,7 +1691,7 @@ function hydroClassAt(lng, lat) {
   const h = ensureHydroIndex();
   if (!h) return "unavailable";
   if (hydroPointInLayer(h.land, lng, lat)) return "land";
-  if (hydroPointInLayer(h.dark10, lng, lat)) return "dark10";
+  if (hydroPointInLayer(h.dark, lng, lat)) return "dark";
   return "other";
 }
 
@@ -1532,42 +1729,45 @@ function nearestRouteHazard(a, b) {
 }
 
 function routeHydroAssessment(a, b) {
-  if (!ensureHydroIndex()) {
+  const h = ensureHydroIndex();
+  if (!h) {
     return { kind: "unavailable", label: "Hydro model unavailable", color: "#64748b" };
   }
-  const meters = geoDistMeters(a.lat, a.lng, b.lat, b.lng);
-  const stepM = Math.max(HYDRO_SAMPLE_MIN_M, Math.min(HYDRO_SAMPLE_MAX_M, meters / HYDRO_SAMPLE_TARGET || HYDRO_SAMPLE_MIN_M));
-  const steps = Math.max(1, Math.ceil(meters / stepM));
-  const counts = { land: 0, dark10: 0, other: 0 };
 
-  for (let i = 0; i <= steps; i++) {
-    const t = i / steps;
-    const lat = a.lat + (b.lat - a.lat) * t;
-    const lng = a.lng + (b.lng - a.lng) * t;
-    const kind = hydroClassAt(lng, lat);
-    if (counts[kind] != null) counts[kind]++;
-    else counts.other++;
-  }
-
+  const landHit = hydroRouteIntersectsLayer(h.land, a, b);
+  const shallowHit = hydroRouteIntersectsLayer(h.dark, a, b);
+  const shallowDistanceM = shallowHit ? 0 : hydroRouteBoundaryDistanceMeters(h.darkBoundary, a, b, shallowBufferM);
+  const shallowNear = !shallowHit && shallowDistanceM <= shallowBufferM;
   const hazard = nearestRouteHazard(a, b);
-  const hazardNear = !!hazard && hazard.distanceM < 10;
-  const shallowNear = counts.dark10 > 0;
+  const hazardNear = !!hazard && hazard.distanceM <= hazardBufferM;
 
-  if (counts.land > 0) {
-    return { kind: "land", label: "⛔ Land / invalid", color: "#ef4444", counts, hazard };
+  if (landHit) {
+    return { kind: "land", label: "⛔ Land / invalid", color: "#ef4444", hazard };
   }
+
+  const hazardName = hazard?.feature?.properties?.Name || hazard?.feature?.properties?.Type || "Hazard";
+  const hazardLabel = hazardNear ? `${hazardName} within ${Math.round(hazardBufferM)} m (${Math.max(0, Math.round(hazard.distanceM))} m)` : "";
+
+  if (shallowHit && hazardNear) {
+    return { kind: "multi", label: `⚠ In shallow water + ${hazardLabel}`, color: "#ef4444", hazard };
+  }
+  if (shallowHit) {
+    return { kind: "shallow", label: "⚠ In shallow water", color: "#ef4444", hazard };
+  }
+  const shallowDistanceLabel = Number.isFinite(shallowDistanceM)
+    ? `${Math.max(0, Math.round(shallowDistanceM))} m`
+    : `≤${Math.round(shallowBufferM)} m`;
+
   if (shallowNear && hazardNear) {
-    const name = hazard.feature?.properties?.Name || hazard.feature?.properties?.Type || "hazard";
-    return { kind: "multi", label: `⚠ Shallow water + ${name} within 10 m`, color: "#ef4444", counts, hazard };
+    return { kind: "multi", label: `⚠ Near shallow water (${shallowDistanceLabel}) + ${hazardLabel}`, color: "#ef4444", hazard, shallowDistanceM };
   }
   if (shallowNear) {
-    return { kind: "dark10", label: "⚠ Within 10 m of shallow water", color: "#ef4444", counts, hazard };
+    return { kind: "shallow-near", label: `⚠ Near shallow water (${shallowDistanceLabel})`, color: "#f59e0b", hazard, shallowDistanceM };
   }
   if (hazardNear) {
-    const name = hazard.feature?.properties?.Name || hazard.feature?.properties?.Type || "Hazard";
-    return { kind: "hazard", label: `⚠ ${name} · ${Math.max(0, Math.round(hazard.distanceM))} m`, color: "#ef4444", counts, hazard };
+    return { kind: "hazard", label: `⚠ ${hazardLabel}`, color: "#ef4444", hazard };
   }
-  return { kind: "ok", label: "✓ Hydro OK", color: "#22a06b", counts, hazard };
+  return { kind: "ok", label: "✓ Hydro OK", color: "#22a06b", hazard };
 }
 
 function ensureHazardMapLayer() {
@@ -1625,9 +1825,10 @@ function ensureHazardMapLayer() {
         ],
         "icon-size": ["interpolate", ["linear"], ["zoom"],
           9, 0.42,
-          12, 0.52,
-          15, 0.72,
-          17, 0.88
+          12, 0.58,
+          14, 0.88,
+          15, 1.25,
+          17, 1.80
         ],
         "icon-allow-overlap": true,
         "icon-ignore-placement": true,
@@ -1934,46 +2135,19 @@ function reverseRoute() {
 }
 
 function buildControls() {
-  const panel = document.getElementById("mm-panel");
-  const header = document.getElementById("mm-toggle");
-  if (!panel || !header) return;
+  const rail = document.getElementById("app-rail");
+  if (!rail) return;
 
-  try {
-    // (Leaflet-specific propagation suppression skipped)
-  } catch {}
-
-  const doToggle = (ev) => {
-    ev.preventDefault();
-    ev.stopPropagation();
-    const isCollapsed = panel.classList.toggle("collapsed");
-    header.setAttribute("aria-expanded", String(!isCollapsed));
-  };
-
-  panel.addEventListener("click", (e) => {
-    const hit = e.target instanceof Element && e.target.closest("#mm-toggle");
-    if (hit) doToggle(e);
-  });
-
-  header.setAttribute("role", "button");
-  header.setAttribute("tabindex", "0");
-  header.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" || e.key === " ") {
-      e.preventDefault();
-      doToggle(e);
-    }
-  });
-
-  // Ensure "Clear markers" button exists
+  // Ensure the Clear markers action exists alongside Drop marker.
   const dropBtn = $("#mm-drop-marker");
   if (dropBtn) {
     let clearBtn = $("#mm-clearmarkers");
     if (!clearBtn) {
       clearBtn = document.createElement("button");
       clearBtn.id = "mm-clearmarkers";
+      clearBtn.type = "button";
       clearBtn.textContent = "Clear markers";
-      (dropBtn.parentElement || panel.querySelector(".ctrl-body"))?.appendChild(
-        clearBtn
-      );
+      (dropBtn.closest(".ctrl-section") || dropBtn.parentElement)?.appendChild(clearBtn);
       clearBtn.addEventListener("click", () => {
         if (confirm("Remove all markers?")) {
           clearAllMarkers();
@@ -2027,7 +2201,7 @@ function initMarineMapOnce() {
 
   mmMap.addControl(
     new maplibregl.NavigationControl({ visualizePitch: true }),
-    "top-left"
+    "top-right"
   );
   mmMap.addControl(
     new maplibregl.AttributionControl({ compact: true }),
@@ -2408,6 +2582,7 @@ setInterval(() => {
    Wire up Marine Map controls (no inline handlers)
    ========================================================= */
 function wireControls() {
+  setupMapRail();
   $("#mm-startgps")?.addEventListener("click", startGpsForMap);
   $("#mm-recenter")?.addEventListener("click", recenterToBoat);
 
@@ -2451,6 +2626,30 @@ function wireControls() {
       routeSpeedKts = Math.min(15, Math.max(0.5, v));
       try { localStorage.setItem(LS_ROUTE_SPEED, String(routeSpeedKts)); } catch {}
       updateMeasureUi();
+    });
+  }
+  const shallowBufferInput = $("#mm-shallow-buffer");
+  if (shallowBufferInput) {
+    shallowBufferInput.value = String(Math.round(shallowBufferM));
+    shallowBufferInput.addEventListener("change", (e) => {
+      const v = Number(e.target.value);
+      if (!Number.isFinite(v)) return;
+      shallowBufferM = Math.min(100, Math.max(1, v));
+      e.target.value = String(Math.round(shallowBufferM));
+      try { localStorage.setItem(LS_SHALLOW_BUFFER, String(shallowBufferM)); } catch {}
+      updateMeasureSource(false);
+    });
+  }
+  const hazardBufferInput = $("#mm-hazard-buffer");
+  if (hazardBufferInput) {
+    hazardBufferInput.value = String(Math.round(hazardBufferM));
+    hazardBufferInput.addEventListener("change", (e) => {
+      const v = Number(e.target.value);
+      if (!Number.isFinite(v)) return;
+      hazardBufferM = Math.min(200, Math.max(1, v));
+      e.target.value = String(Math.round(hazardBufferM));
+      try { localStorage.setItem(LS_HAZARD_BUFFER, String(hazardBufferM)); } catch {}
+      updateMeasureSource(false);
     });
   }
   $("#mm-measure")?.addEventListener("click", () => setMeasureActive(!measureActive));
