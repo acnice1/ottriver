@@ -1,5 +1,5 @@
 /* =========================================================
-   Ottawa Sailing Dashboard — app.js (MapLibre GL patch)
+   Ottawa River Navigator — app.js (MapLibre GL patch)
    ========================================================= */
 "use strict";
 
@@ -1273,7 +1273,7 @@ function exportGPX() {
   const nowISO = new Date().toISOString();
   let gpx = "";
   gpx += '<?xml version="1.0" encoding="UTF-8"?>\n';
-  gpx += '<gpx version="1.1" creator="Ottawa Sailing Dashboard" ';
+  gpx += '<gpx version="1.1" creator="Ottawa River Navigator" ';
   gpx += 'xmlns="http://www.topografix.com/GPX/1/1" ';
   gpx += 'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" ';
   gpx += 'xsi:schemaLocation="http://www.topografix.com/GPX/1/1 ';
