@@ -1403,6 +1403,16 @@ function wakeLockSupported() {
     typeof navigator.wakeLock.request === "function");
 }
 
+const SCREEN_AWAKE_ICON_ON = `
+<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+  <circle cx="12" cy="12" r="4" fill="currentColor"/>
+  <path d="M12 2.5v2.3M12 19.2v2.3M2.5 12h2.3M19.2 12h2.3M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M18.7 5.3l-1.6 1.6M6.9 17.1l-1.6 1.6" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>
+</svg>`;
+const SCREEN_AWAKE_ICON_OFF = `
+<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+  <path d="M15.4 3.5a7.8 7.8 0 1 0 5.1 13.7A8.6 8.6 0 1 1 15.4 3.5Z" fill="currentColor"/>
+</svg>`;
+
 function syncScreenWakeUi() {
   const btn = $("#mm-mobile-wake");
   if (!btn) return;
@@ -1410,15 +1420,16 @@ function syncScreenWakeUi() {
   btn.classList.toggle("awake-on", active);
   btn.classList.toggle("awake-requested", keepScreenAwake && !active);
   btn.setAttribute("aria-pressed", keepScreenAwake ? "true" : "false");
+  btn.innerHTML = active ? SCREEN_AWAKE_ICON_ON : SCREEN_AWAKE_ICON_OFF;
   if (active) {
-    btn.setAttribute("aria-label", "Allow screen to sleep");
-    btn.title = "Screen awake — tap to allow sleep";
+    btn.setAttribute("aria-label", "Disable screen awake");
+    btn.title = "Screen awake enabled — tap to disable";
   } else if (keepScreenAwake) {
-    btn.setAttribute("aria-label", "Keep screen awake requested; tap to turn off");
+    btn.setAttribute("aria-label", "Screen awake requested; tap to disable");
     btn.title = "Screen awake requested — reconnecting";
   } else {
-    btn.setAttribute("aria-label", "Keep screen awake");
-    btn.title = "Keep screen awake";
+    btn.setAttribute("aria-label", "Enable screen awake");
+    btn.title = "Screen awake disabled — tap to enable";
   }
 }
 
@@ -1448,7 +1459,7 @@ async function acquireScreenWakeLock({ notify = false } = {}) {
       syncScreenWakeUi();
     });
     syncScreenWakeUi();
-    if (notify) showMobileControlToast("Screen will stay awake.");
+    if (notify) showMobileControlToast("screen awake enabled");
     return true;
   } catch (err) {
     screenWakeLock = null;
@@ -1471,7 +1482,7 @@ async function setScreenAwake(on) {
     if (lock && !lock.released) {
       try { await lock.release(); } catch (_) {}
     }
-    showMobileControlToast("Screen sleep enabled.");
+    showMobileControlToast("screen awake disabled");
     return;
   }
 
