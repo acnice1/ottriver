@@ -488,6 +488,7 @@ let trailDirty = false;
 
 let courseUp = false;
 let follow = true;
+let pendingMobileRecenter = false;
 let addMarkerActive = false;
 let measureActive = false;
 let measurePoints = [];
@@ -1420,7 +1421,7 @@ function validateNavigationFix(p, receivedAt = Date.now()) {
 }
 
 function recenterToBoat() {
-  if (plotLat != null && plotLon != null && mmMap && lastFix) {
+  if (plotLat != null && plotLon != null && mmMap) {
     follow = true;
     mmMap.jumpTo({
       center: [plotLon, plotLat],
@@ -1429,9 +1430,29 @@ function recenterToBoat() {
     setGpsStatus("Recentered to last reported GPS position; check the uncertainty indicator.");
     const chk = $("#mm-follow");
     if (chk) chk.checked = true;
-  } else {
-    setGpsStatus("No GPS position has been received yet.");
+    return true;
   }
+  setGpsStatus("No GPS position has been received yet.");
+  return false;
+}
+
+function recenterOrStartGps() {
+  if (!mmMap) initMarineMapOnce();
+
+  // If a position is already available, recenter immediately.
+  if (recenterToBoat()) {
+    pendingMobileRecenter = false;
+    return;
+  }
+
+  // Otherwise start GPS from this user gesture and recenter automatically
+  // when the first accepted position is received.
+  pendingMobileRecenter = true;
+  follow = true;
+  const chk = $("#mm-follow");
+  if (chk) chk.checked = true;
+  setGpsStatus("Starting GPS — map will recenter on the first position fix…");
+  startGpsForMap();
 }
 
 function toggleCourseUp(on) {
@@ -2510,6 +2531,11 @@ function onPos(p) {
     mmBoat.setLngLat([plotLon, plotLat]);
   }
 
+  if (pendingMobileRecenter) {
+    pendingMobileRecenter = false;
+    recenterToBoat();
+  }
+
   // ---------- Trail: collect moving fixes, batch map redraw and storage ----------
   const lastPt = trail.length ? trail[trail.length - 1] : null; // [rawLat, rawLon, t, segmentId]
   const dtSinceLastPtMs = lastPt ? now - lastPt[2] : Infinity;
@@ -2636,7 +2662,7 @@ function wireControls() {
   syncMobilePanelState();
   $("#mm-startgps")?.addEventListener("click", startGpsForMap);
   $("#mm-recenter")?.addEventListener("click", recenterToBoat);
-  $("#mm-mobile-recenter")?.addEventListener("click", recenterToBoat);
+  $("#mm-mobile-recenter")?.addEventListener("click", recenterOrStartGps);
 
   setupFloatingCompass();
 
