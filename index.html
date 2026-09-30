@@ -948,9 +948,7 @@
       }
       .mobile-control-toast.show { display: block; opacity: 1; }
 
-      /* Settings is reached through More on phones. */
-      .app-rail > .rail-btn[data-map-panel="settings"] { display: none; }
-      .mobile-settings-entry { display: flex; }
+      /* Settings is a primary mobile dock item. */
 
       .map-flyout {
         left: 8px; right: 8px; top: auto;
@@ -1036,18 +1034,14 @@
     <button class="rail-btn" type="button" data-map-panel="route" aria-controls="rail-panel-route" aria-expanded="false">
       <span class="rail-icon" aria-hidden="true">↗</span><span class="rail-label">Route</span>
     </button>
-    <button class="rail-btn" type="button" data-map-panel="layers" aria-controls="rail-panel-layers" aria-expanded="false">
-      <span class="rail-icon" aria-hidden="true">▱</span><span class="rail-label">Layers</span>
+    <button class="rail-btn" type="button" data-map-panel="settings" aria-controls="rail-panel-settings" aria-expanded="false">
+      <span class="rail-icon" aria-hidden="true">⚙</span><span class="rail-label">Settings</span>
     </button>
     <button class="rail-btn compass-on" id="mm-show-compass" type="button" aria-pressed="true" aria-label="Hide compass">
       <span class="rail-icon" aria-hidden="true">⊙</span><span class="rail-label">Compass</span>
     </button>
     <button class="rail-btn" type="button" data-map-panel="more" aria-controls="rail-panel-more" aria-expanded="false">
       <span class="rail-icon" aria-hidden="true">⋯</span><span class="rail-label">More</span>
-    </button>
-    <span class="rail-spacer" aria-hidden="true"></span>
-    <button class="rail-btn" type="button" data-map-panel="settings" aria-controls="rail-panel-settings" aria-expanded="false">
-      <span class="rail-icon" aria-hidden="true">⚙</span><span class="rail-label">Settings</span>
     </button>
 
     <section class="map-flyout open" id="rail-panel-boat" data-flyout="boat" aria-label="Boat and GPS controls">
@@ -1076,7 +1070,10 @@
             <div class="track-metric"><span class="k">Maximum</span><span id="mm-track-max" class="v">0.0 kn</span></div>
           </div>
         </div>
-        <label class="ctrl-toggle"><input type="checkbox" id="mm-trail-recording" checked> Recording</label>
+        <div class="ctrl-row">
+          <label class="ctrl-toggle"><input type="checkbox" id="mm-trail-recording" checked> Recording</label>
+          <label class="ctrl-toggle"><input type="checkbox" id="mm-trail-visible" checked> Show sailed track</label>
+        </div>
         <div class="ctrl-row">
           <button id="mm-newtrip" type="button">New trip</button>
           <button id="mm-cleartrail" type="button">Clear history</button>
@@ -1131,36 +1128,6 @@
         <div id="mm-route-legs" class="route-legs" aria-live="polite"></div>
         <div class="tiny-note">Tap the map to add waypoints. Drag numbered waypoints to refine the route.</div>
       </div>
-    </section>
-
-    <section class="map-flyout" id="rail-panel-layers" data-flyout="layers" aria-label="Map layers">
-      <div class="flyout-heading"><div><strong>Layers</strong><span>Map information used while underway</span></div></div>
-      <div class="ctrl-section">
-        <div class="ctrl-section-title">Chart</div>
-        <label class="opacity-control" for="mm-chart-opacity">
-          <span>Overlay opacity</span>
-          <span id="mm-chart-opacity-value" class="opacity-value">98%</span>
-          <input id="mm-chart-opacity" type="range" min="0" max="100" step="1" value="98" aria-label="Marine chart opacity">
-        </label>
-      </div>
-      <div class="ctrl-section">
-        <div class="ctrl-section-title">Hydro intelligence</div>
-        <div class="hydro-readout">
-          <strong id="mm-hydro-status">1550A model loading…</strong>
-          <div class="tiny-note">Land is invalid. Dark-blue shallow water and non-buoy hazards use the safety distances in Settings.</div>
-        </div>
-        <label class="ctrl-toggle"><input type="checkbox" id="mm-hydro-visible"> Show hydro zones</label>
-        <div class="hydro-legend" aria-label="Hydro intelligence legend">
-          <span><i class="hydro-swatch" style="background:#ef4444"></i>In shallow / land</span>
-          <span><i class="hydro-swatch" style="background:#f59e0b"></i>Near shallow</span>
-          <span><i class="hydro-swatch" style="background:#ef4444"></i>Hazards</span>
-          <span><i class="hydro-swatch" style="background:#22c55e"></i>Red/green buoys exempt</span>
-        </div>
-      </div>
-      <div class="ctrl-section">
-        <div class="ctrl-section-title">Track</div>
-        <label class="ctrl-toggle"><input type="checkbox" id="mm-trail-visible" checked> Show sailed track</label>
-      </div>
       <div class="ctrl-section">
         <div class="ctrl-section-title">Markers</div>
         <div class="ctrl-row marker-row">
@@ -1182,12 +1149,33 @@
         <button type="button" class="menu-tab" data-tab="radar" aria-controls="radar">Radar <span>›</span></button>
         <button type="button" class="menu-tab" data-tab="info" aria-controls="info">Reference <span>›</span></button>
         <button type="button" class="menu-tab" data-tab="emergency" aria-controls="emergency">Safety <span>›</span></button>
-        <button type="button" class="menu-tab mobile-settings-entry" data-map-panel="settings" aria-controls="rail-panel-settings" aria-expanded="false">Settings <span>›</span></button>
       </div>
     </section>
 
     <section class="map-flyout" id="rail-panel-settings" data-flyout="settings" aria-label="Map settings">
       <div class="flyout-heading"><div><strong>Settings</strong><span>Preferences you normally set and leave alone</span></div></div>
+      <div class="ctrl-section">
+        <div class="ctrl-section-title">Map display</div>
+        <label class="opacity-control" for="mm-chart-opacity">
+          <span>Overlay opacity</span>
+          <span id="mm-chart-opacity-value" class="opacity-value">98%</span>
+          <input id="mm-chart-opacity" type="range" min="0" max="100" step="1" value="98" aria-label="Marine chart opacity">
+        </label>
+        <label class="ctrl-toggle" style="margin-top:8px"><input type="checkbox" id="mm-hydro-visible"> Show hydro zones</label>
+      </div>
+      <div class="ctrl-section">
+        <div class="ctrl-section-title">Hydro intelligence</div>
+        <div class="hydro-readout">
+          <strong id="mm-hydro-status">1550A model loading…</strong>
+          <div class="tiny-note">Land is invalid. Dark-blue shallow water and non-buoy hazards use the safety distances below.</div>
+        </div>
+        <div class="hydro-legend" aria-label="Hydro intelligence legend">
+          <span><i class="hydro-swatch" style="background:#ef4444"></i>In shallow / land</span>
+          <span><i class="hydro-swatch" style="background:#f59e0b"></i>Near shallow</span>
+          <span><i class="hydro-swatch" style="background:#ef4444"></i>Hazards</span>
+          <span><i class="hydro-swatch" style="background:#22c55e"></i>Red/green buoys exempt</span>
+        </div>
+      </div>
       <div class="ctrl-section">
         <div class="ctrl-section-title">Route defaults</div>
         <div class="settings-grid">

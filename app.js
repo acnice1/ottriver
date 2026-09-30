@@ -180,9 +180,9 @@ function setupMapRail() {
       if (!panel) return;
       const isOpen = panel.classList.contains("open");
 
-      // Boat, Route and Layers are map-operating controls. Selecting them from
+      // Boat, Route and Settings are map-operating controls. Selecting them from
       // another page returns to Charts automatically.
-      if (["boat", "route", "layers"].includes(name) && !$("#map")?.classList.contains("active")) {
+      if (["boat", "route", "settings"].includes(name) && !$("#map")?.classList.contains("active")) {
         showTab("map", null);
       }
 
