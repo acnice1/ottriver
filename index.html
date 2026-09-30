@@ -819,31 +819,13 @@
     }
     .map-flyout .menu-tab span { color: rgba(255,255,255,.45); font-size: 1rem; }
     .map-flyout .menu-tab.active { background: rgba(49,166,215,.18); border-color: rgba(92,197,235,.28); }
-    .map-brand-chip {
-      position: fixed;
-      z-index: 3100;
-      left: calc(var(--rail-w) + 12px);
-      top: 10px;
-      padding: 6px 10px;
-      border-radius: 9px;
-      color: #173148;
-      background: rgba(248,251,253,.88);
-      border: 1px solid rgba(17,46,68,.12);
-      box-shadow: 0 4px 14px rgba(18,44,62,.08);
-      backdrop-filter: blur(7px);
-      -webkit-backdrop-filter: blur(7px);
-      font-size: .72rem;
-      font-weight: 800;
-      pointer-events: none;
-    }
-    body:not([data-active-tab="map"]) .map-brand-chip { display: none; }
     .floating-compass { left: calc(var(--rail-w) + 20px); top: 56px; }
     .maplibregl-ctrl-top-right { top: 4px; right: 4px; }
     .maplibregl-ctrl-bottom-left { left: var(--rail-w); }
     .maplibregl-ctrl-bottom-right { right: 4px; }
     /* Mobile: preserve map width with a bottom dock + bottom sheets. */
     :root { --mobile-dock-h: 60px; }
-    .mobile-speed-pill, .mobile-hydro-alert, .mobile-settings-entry { display: none; }
+    .mobile-speed-pill, .mobile-hydro-alert, .mobile-settings-entry, .mobile-recenter-btn { display: none; }
 
     @media (max-width: 760px), (max-width: 900px) and (pointer: coarse) {
       :root { --rail-w: 0px; --mobile-dock-h: 60px; }
@@ -864,6 +846,22 @@
       }
       .app-rail > .rail-btn .rail-icon { font-size: 19px; }
       .app-rail > .rail-btn .rail-label { display: block; font-size: 9px; }
+
+      /* Recenter is a dedicated GPS control directly above Compass on phones. */
+      .mobile-recenter-btn {
+        position: fixed; z-index: 5260; right: 10px; left: auto;
+        bottom: calc(var(--mobile-dock-h) + 62px);
+        width: 44px; height: 44px; padding: 0;
+        align-items: center; justify-content: center;
+        border-radius: 50%; color: #fff;
+        background: rgba(7,24,41,.91);
+        border: 1px solid rgba(255,255,255,.16);
+        box-shadow: 0 7px 20px rgba(0,0,0,.24);
+        backdrop-filter: blur(9px); -webkit-backdrop-filter: blur(9px);
+        cursor: pointer;
+      }
+      .mobile-recenter-btn svg { width: 22px; height: 22px; display: block; }
+      body[data-active-tab="map"].gps-active .mobile-recenter-btn { display: flex; }
 
       /* Compass remains an independent one-tap control, not a dock item. */
       #mm-show-compass {
@@ -940,7 +938,6 @@
         margin: 8px 8px calc(var(--mobile-dock-h) + 8px);
         padding: .8rem; border-radius: 14px;
       }
-      .map-brand-chip { left: 8px; top: 8px; }
       .floating-compass { left: 10px; top: 48px; }
       .maplibregl-ctrl-bottom-left { left: 0; bottom: var(--mobile-dock-h); }
       .maplibregl-ctrl-bottom-right { bottom: var(--mobile-dock-h); }
@@ -1118,6 +1115,13 @@
   <button id="mm-mobile-speed-pill" class="mobile-speed-pill" type="button" aria-label="Open Boat and GPS controls">
     <span id="mm-mobile-speed" class="mobile-speed-value">—</span><small>kn</small>
   </button>
+  <button id="mm-mobile-recenter" class="mobile-recenter-btn" type="button" aria-label="Recenter map on my location" title="Recenter on my location">
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <circle cx="12" cy="12" r="5.5" fill="none" stroke="currentColor" stroke-width="1.8"/>
+      <circle cx="12" cy="12" r="2" fill="currentColor"/>
+      <path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+    </svg>
+  </button>
   <div id="mm-mobile-hydro-alert" class="mobile-hydro-alert" role="status" aria-live="polite"></div>
 
   <!-- Forecast Tab -->
@@ -1234,8 +1238,6 @@
   <!-- Marine Map Tab -->
   <section id="map" class="tab-content active" role="region" aria-labelledby="map-tab">
     <div id="leaflet-map" aria-label="Marine Map"></div>
-    <div class="map-brand-chip" aria-hidden="true">Ottawa Sail Navigator</div>
-
     <!-- Draggable detailed compass -->
     <div class="floating-compass" id="mm-detailed-compass" aria-label="Detailed heading compass">
       <div class="floating-compass-header" id="mm-compass-drag">

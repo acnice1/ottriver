@@ -2636,6 +2636,7 @@ function wireControls() {
   syncMobilePanelState();
   $("#mm-startgps")?.addEventListener("click", startGpsForMap);
   $("#mm-recenter")?.addEventListener("click", recenterToBoat);
+  $("#mm-mobile-recenter")?.addEventListener("click", recenterToBoat);
 
   setupFloatingCompass();
 
