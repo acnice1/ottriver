@@ -48,6 +48,15 @@ const TRAIL_ACC_DIST_FACTOR = 0.35; // increase point spacing as GPS uncertainty
 const TRAIL_SEGMENT_GAP_MS = 30 * 60 * 1000; // break the drawn line after 30 min without a stored point
 const TRAIL_SEGMENT_JUMP_M = 500; // also break if the next accepted point is implausibly far away
 
+// Anchor watch cadence / quality
+const ANCHOR_HISTORY_MAX_POINTS = 8000;
+const ANCHOR_HISTORY_MIN_SEC = 10;
+const ANCHOR_HISTORY_MIN_DIST_M = 1.5;
+const ANCHOR_HISTORY_HEARTBEAT_SEC = 60;
+const ANCHOR_HISTORY_GAP_MS = 5 * 60 * 1000;
+const ANCHOR_MAX_ACC_M = 30;
+const ANCHOR_ALARM_VIBRATE_MS = 30000;
+
 // Staleness / fallbacks
 const MAX_STALE_MS = 4000; // watchdog pull-fresh threshold
 const NAV_MAX_FIX_AGE_MS = 5000;
@@ -77,6 +86,7 @@ const LS_TRAIL_VISIBLE = "sailTrailVisible_v1";
 const LS_HYDRO_VISIBLE = "sailHydroVisible_v1";
 const LS_SHALLOW_BUFFER = "sailShallowBufferM_v1";
 const LS_HAZARD_BUFFER = "sailHazardBufferM_v1";
+const LS_ANCHOR_WATCH = "sailAnchorWatch_v1";
 
 /* ===== EMA helpers (explicit position & speed EMAs) ===== */
 const makeEma = (alpha) => (current, prev) =>
@@ -501,6 +511,47 @@ let shallowBufferM = Math.min(100, Math.max(1, parseFloat(localStorage.getItem(L
 let hazardBufferM = Math.min(200, Math.max(1, parseFloat(localStorage.getItem(LS_HAZARD_BUFFER) || "20") || 20));
 let hydroIndex = null;
 const HYDRO_GRID_DEG = 0.0125;
+
+const anchorWatchDefaults = () => ({
+  active: false,
+  lat: null,
+  lon: null,
+  radiusM: 40,
+  startedAt: null,
+  history: [],
+  swingVisible: true,
+});
+let anchorWatch = (() => {
+  const fallback = anchorWatchDefaults();
+  try {
+    const raw = JSON.parse(localStorage.getItem(LS_ANCHOR_WATCH) || "null");
+    if (!raw || typeof raw !== "object") return fallback;
+    const lat = Number(raw.lat), lon = Number(raw.lon);
+    const active = !!raw.active && Number.isFinite(lat) && Number.isFinite(lon);
+    const radiusM = Math.min(250, Math.max(5, Number(raw.radiusM) || 40));
+    const history = Array.isArray(raw.history)
+      ? raw.history.filter((pt) => Array.isArray(pt) && Number.isFinite(pt[0]) && Number.isFinite(pt[1]) && Number.isFinite(pt[2]))
+          .slice(-ANCHOR_HISTORY_MAX_POINTS)
+      : [];
+    return {
+      active, lat: active ? lat : null, lon: active ? lon : null, radiusM,
+      startedAt: Number.isFinite(raw.startedAt) ? raw.startedAt : null,
+      history, swingVisible: raw.swingVisible !== false,
+    };
+  } catch (_) {
+    return fallback;
+  }
+})();
+let anchorMarker = null;
+let anchorCurrentDistanceM = null;
+let anchorMaxDistanceM = 0;
+let anchorFixAccuracyM = null;
+let anchorAlarmActive = false;
+let anchorLastVibrateAt = 0;
+let anchorWatchDirty = false;
+let anchorWatchSaveTimer = null;
+let pendingAnchorSet = false;
+let anchorAutoResumeAttempted = false;
 
 // MapLibre DOM markers we add (keeps API simple)
 let markersLayer = [];
@@ -1024,8 +1075,13 @@ function raiseMeasurementLayers() {
 
 function raiseOperationalLayers() {
   if (!mmMap) return;
-  // Explicit map stack: charts < accuracy < sailed track < measurement.
-  ["nav-accuracy-fill", "nav-accuracy-outline", "trail-line-casing", "trail-line"].forEach((id) => {
+  // Explicit map stack: charts < accuracy < sailed track < anchor watch < measurement.
+  [
+    "nav-accuracy-fill", "nav-accuracy-outline",
+    "trail-line-casing", "trail-line",
+    "anchor-radius-fill", "anchor-radius-outline",
+    "anchor-swing-line", "anchor-swing-points", "anchor-distance-line"
+  ].forEach((id) => {
     if (mmMap.getLayer(id)) mmMap.moveLayer(id);
   });
   raiseMeasurementLayers();
@@ -2204,6 +2260,298 @@ function reverseRoute() {
   updateMeasureSource();
 }
 
+function saveAnchorWatchNow() {
+  if (anchorWatchSaveTimer != null) clearTimeout(anchorWatchSaveTimer);
+  anchorWatchSaveTimer = null;
+  try {
+    localStorage.setItem(LS_ANCHOR_WATCH, JSON.stringify(anchorWatch));
+    anchorWatchDirty = false;
+  } catch (e) {
+    console.warn("anchor watch save failed", e);
+  }
+}
+
+function queueAnchorWatchSave() {
+  anchorWatchDirty = true;
+  if (anchorWatchSaveTimer != null) return;
+  anchorWatchSaveTimer = setTimeout(saveAnchorWatchNow, 15000);
+}
+
+function flushAnchorWatchSave() {
+  if (anchorWatchSaveTimer != null) clearTimeout(anchorWatchSaveTimer);
+  anchorWatchSaveTimer = null;
+  if (anchorWatchDirty) saveAnchorWatchNow();
+}
+
+function anchorRadiusPolygon(lat, lon, radiusM, steps = 72) {
+  const coords = [];
+  const latScale = 111320;
+  const lonScale = Math.max(1, 111320 * Math.cos(lat * Math.PI / 180));
+  for (let i = 0; i <= steps; i++) {
+    const a = i / steps * Math.PI * 2;
+    const east = Math.sin(a) * radiusM;
+    const north = Math.cos(a) * radiusM;
+    coords.push([lon + east / lonScale, lat + north / latScale]);
+  }
+  return coords;
+}
+
+function anchorHistorySegments() {
+  const segments = [];
+  let current = [];
+  let prev = null;
+  for (const pt of anchorWatch.history) {
+    if (!Array.isArray(pt) || pt.length < 3) continue;
+    if (prev && pt[2] - prev[2] > ANCHOR_HISTORY_GAP_MS) {
+      if (current.length >= 2) segments.push(current);
+      current = [];
+    }
+    current.push([pt[1], pt[0]]);
+    prev = pt;
+  }
+  if (current.length >= 2) segments.push(current);
+  return segments;
+}
+
+function recomputeAnchorDistances() {
+  anchorMaxDistanceM = 0;
+  if (!anchorWatch.active || !Number.isFinite(anchorWatch.lat) || !Number.isFinite(anchorWatch.lon)) {
+    anchorCurrentDistanceM = null;
+    return;
+  }
+  for (const pt of anchorWatch.history) {
+    if (!Array.isArray(pt) || pt.length < 2) continue;
+    anchorMaxDistanceM = Math.max(anchorMaxDistanceM,
+      geoDistMeters(anchorWatch.lat, anchorWatch.lon, pt[0], pt[1]));
+  }
+  if (plotLat != null && plotLon != null) {
+    anchorCurrentDistanceM = geoDistMeters(anchorWatch.lat, anchorWatch.lon, plotLat, plotLon);
+    anchorMaxDistanceM = Math.max(anchorMaxDistanceM, anchorCurrentDistanceM);
+  } else {
+    anchorCurrentDistanceM = null;
+  }
+}
+
+function setAnchorAlarm(isAlarm) {
+  anchorAlarmActive = !!isAlarm;
+  const markerEl = anchorMarker?.getElement?.();
+  markerEl?.classList.toggle("alarm", anchorAlarmActive);
+  if (anchorAlarmActive && Date.now() - anchorLastVibrateAt >= ANCHOR_ALARM_VIBRATE_MS) {
+    anchorLastVibrateAt = Date.now();
+    try { navigator.vibrate?.([300, 180, 300]); } catch (_) {}
+  }
+}
+
+function ensureAnchorMarker() {
+  if (!mmMap) return;
+  if (!anchorWatch.active || !Number.isFinite(anchorWatch.lat) || !Number.isFinite(anchorWatch.lon)) {
+    if (anchorMarker) {
+      anchorMarker.remove();
+      anchorMarker = null;
+    }
+    return;
+  }
+  if (!anchorMarker) {
+    const el = document.createElement("div");
+    el.className = "anchor-watch-marker";
+    el.setAttribute("role", "button");
+    el.setAttribute("aria-label", "Anchor position. Drag to correct anchor location.");
+    el.title = "Drag to correct anchor position";
+    el.textContent = "⚓";
+    anchorMarker = new maplibregl.Marker({ element: el, draggable: true, anchor: "center" })
+      .setLngLat([anchorWatch.lon, anchorWatch.lat])
+      .addTo(mmMap);
+    anchorMarker.on("dragend", () => {
+      const ll = anchorMarker.getLngLat();
+      anchorWatch.lat = ll.lat;
+      anchorWatch.lon = ll.lng;
+      recomputeAnchorDistances();
+      const shouldAlarm = anchorCurrentDistanceM != null && Number.isFinite(anchorFixAccuracyM) &&
+        anchorFixAccuracyM <= ANCHOR_MAX_ACC_M && anchorCurrentDistanceM > anchorWatch.radiusM;
+      setAnchorAlarm(shouldAlarm);
+      saveAnchorWatchNow();
+      updateAnchorWatchMap();
+      updateAnchorWatchUi();
+      setGpsStatus("Anchor position corrected. Swing history retained and distances recalculated.");
+    });
+  } else {
+    anchorMarker.setLngLat([anchorWatch.lon, anchorWatch.lat]);
+  }
+  anchorMarker.getElement()?.classList.toggle("alarm", anchorAlarmActive);
+}
+
+function updateAnchorWatchMap() {
+  if (!mmMap?.getSource?.("anchor-watch")) return;
+  const features = [];
+  if (anchorWatch.active && Number.isFinite(anchorWatch.lat) && Number.isFinite(anchorWatch.lon)) {
+    features.push({
+      type: "Feature", properties: { kind: "radius", alarm: anchorAlarmActive ? 1 : 0 },
+      geometry: { type: "Polygon", coordinates: [anchorRadiusPolygon(anchorWatch.lat, anchorWatch.lon, anchorWatch.radiusM)] },
+    });
+    if (anchorWatch.swingVisible && anchorWatch.history.length) {
+      const pts = anchorWatch.history.map((pt) => [pt[1], pt[0]]);
+      features.push({
+        type: "Feature", properties: { kind: "swingPoints" },
+        geometry: { type: "MultiPoint", coordinates: pts },
+      });
+      const segs = anchorHistorySegments();
+      if (segs.length) {
+        features.push({
+          type: "Feature", properties: { kind: "swing" },
+          geometry: segs.length === 1
+            ? { type: "LineString", coordinates: segs[0] }
+            : { type: "MultiLineString", coordinates: segs },
+        });
+      }
+    }
+    if (plotLat != null && plotLon != null) {
+      features.push({
+        type: "Feature", properties: { kind: "distance", alarm: anchorAlarmActive ? 1 : 0 },
+        geometry: { type: "LineString", coordinates: [[anchorWatch.lon, anchorWatch.lat], [plotLon, plotLat]] },
+      });
+    }
+  }
+  mmMap.getSource("anchor-watch").setData({ type: "FeatureCollection", features });
+  ensureAnchorMarker();
+  raiseOperationalLayers();
+}
+
+function updateAnchorWatchUi() {
+  const status = $("#mm-anchor-status");
+  const current = $("#mm-anchor-current");
+  const max = $("#mm-anchor-max");
+  const points = $("#mm-anchor-points");
+  const radius = $("#mm-anchor-radius");
+  const swing = $("#mm-anchor-swing-visible");
+  const setBtn = $("#mm-anchor-set");
+  const clearBtn = $("#mm-anchor-clear");
+  const clearSwingBtn = $("#mm-anchor-clear-swing");
+  const banner = $("#mm-anchor-alarm");
+
+  if (radius && document.activeElement !== radius) radius.value = String(Math.round(anchorWatch.radiusM));
+  if (swing) swing.checked = anchorWatch.swingVisible;
+  if (setBtn) setBtn.textContent = pendingAnchorSet ? "Waiting for GPS…" : (anchorWatch.active ? "Reset at boat" : "Set anchor at boat");
+  if (clearBtn) clearBtn.disabled = !anchorWatch.active;
+  if (clearSwingBtn) clearSwingBtn.disabled = !anchorWatch.active || !anchorWatch.history.length;
+
+  if (!anchorWatch.active) {
+    if (status) {
+      status.textContent = pendingAnchorSet ? "Starting GPS to set anchor…" : "Off";
+      status.classList.remove("alarm");
+    }
+    if (current) current.textContent = "—";
+    if (max) max.textContent = "—";
+    if (points) points.textContent = "0";
+    if (banner) banner.classList.remove("active");
+    return;
+  }
+
+  if (status) {
+    const accText = Number.isFinite(anchorFixAccuracyM) ? ` · GPS ±${Math.round(anchorFixAccuracyM)} m` : "";
+    status.textContent = (anchorAlarmActive ? "ALARM — outside radius" : "Watching") + accText;
+    status.classList.toggle("alarm", anchorAlarmActive);
+  }
+  if (current) current.textContent = anchorCurrentDistanceM == null ? "—" : `${Math.round(anchorCurrentDistanceM)} m`;
+  if (max) max.textContent = `${Math.round(anchorMaxDistanceM)} m`;
+  if (points) points.textContent = anchorWatch.history.length.toLocaleString();
+
+  if (banner) {
+    banner.textContent = anchorAlarmActive
+      ? `⚠ Anchor watch: ${Math.round(anchorCurrentDistanceM)} m from anchor · radius ${Math.round(anchorWatch.radiusM)} m`
+      : "";
+    banner.classList.toggle("active", anchorAlarmActive);
+  }
+}
+
+function startAnchorWatchAt(lat, lon, timestamp = Date.now(), accuracy = null) {
+  anchorWatch.active = true;
+  anchorWatch.lat = lat;
+  anchorWatch.lon = lon;
+  anchorWatch.startedAt = timestamp;
+  anchorWatch.history = [[lat, lon, timestamp, Number.isFinite(accuracy) ? accuracy : null]];
+  anchorCurrentDistanceM = 0;
+  anchorMaxDistanceM = 0;
+  anchorFixAccuracyM = Number.isFinite(accuracy) ? accuracy : null;
+  pendingAnchorSet = false;
+  setAnchorAlarm(false);
+  saveAnchorWatchNow();
+  updateAnchorWatchMap();
+  updateAnchorWatchUi();
+  setGpsStatus("Anchor watch started. Drag the ⚓ marker if the actual anchor position differs from the boat position.");
+}
+
+function setAnchorAtBoat() {
+  if (anchorWatch.active) {
+    const ok = confirm("Reset the anchor to the boat's current position and start a new swing history? To correct the existing anchor without clearing history, drag the ⚓ marker instead.");
+    if (!ok) return;
+  }
+  if (plotLat != null && plotLon != null) {
+    startAnchorWatchAt(plotLat, plotLon, lastFix?.t || Date.now(), lastFix?.acc ?? null);
+    return;
+  }
+  pendingAnchorSet = true;
+  updateAnchorWatchUi();
+  startGpsForMap();
+  setGpsStatus("Starting GPS — anchor will be set at the first accepted position.");
+}
+
+function clearAnchorWatch() {
+  if (anchorWatch.active && !confirm("Stop anchor watch and clear the anchor and swing history?")) return;
+  const radiusM = anchorWatch.radiusM;
+  const swingVisible = anchorWatch.swingVisible;
+  anchorWatch = { ...anchorWatchDefaults(), radiusM, swingVisible };
+  pendingAnchorSet = false;
+  anchorCurrentDistanceM = null;
+  anchorMaxDistanceM = 0;
+  anchorFixAccuracyM = null;
+  setAnchorAlarm(false);
+  saveAnchorWatchNow();
+  updateAnchorWatchMap();
+  updateAnchorWatchUi();
+  setGpsStatus("Anchor watch stopped and cleared.");
+}
+
+function clearAnchorSwingHistory() {
+  if (!anchorWatch.active) return;
+  anchorWatch.history = [];
+  if (plotLat != null && plotLon != null) {
+    anchorWatch.history.push([plotLat, plotLon, lastFix?.t || Date.now(), lastFix?.acc ?? null]);
+  }
+  recomputeAnchorDistances();
+  saveAnchorWatchNow();
+  updateAnchorWatchMap();
+  updateAnchorWatchUi();
+  setGpsStatus("Anchor swing history cleared; anchor watch is still active.");
+}
+
+function updateAnchorWatchWithFix(lat, lon, timestamp, accuracy, recent) {
+  if (!anchorWatch.active) return;
+  const goodFix = recent && Number.isFinite(accuracy) && accuracy > 0 && accuracy <= ANCHOR_MAX_ACC_M;
+  anchorFixAccuracyM = Number.isFinite(accuracy) ? accuracy : null;
+  anchorCurrentDistanceM = geoDistMeters(anchorWatch.lat, anchorWatch.lon, lat, lon);
+
+  if (goodFix) {
+    const last = anchorWatch.history.length ? anchorWatch.history[anchorWatch.history.length - 1] : null;
+    const dtSec = last ? (timestamp - last[2]) / 1000 : Infinity;
+    const movedM = last ? geoDistMeters(last[0], last[1], lat, lon) : Infinity;
+    const shouldStore = !last || (dtSec >= ANCHOR_HISTORY_MIN_SEC &&
+      (movedM >= ANCHOR_HISTORY_MIN_DIST_M || dtSec >= ANCHOR_HISTORY_HEARTBEAT_SEC));
+    if (shouldStore) {
+      anchorWatch.history.push([lat, lon, timestamp, accuracy]);
+      if (anchorWatch.history.length > ANCHOR_HISTORY_MAX_POINTS) {
+        anchorWatch.history.splice(0, anchorWatch.history.length - ANCHOR_HISTORY_MAX_POINTS);
+      }
+      anchorMaxDistanceM = Math.max(anchorMaxDistanceM, anchorCurrentDistanceM);
+      queueAnchorWatchSave();
+    }
+  }
+
+  const shouldAlarm = goodFix && anchorCurrentDistanceM > anchorWatch.radiusM;
+  setAnchorAlarm(shouldAlarm);
+  updateAnchorWatchMap();
+  updateAnchorWatchUi();
+}
+
 function buildControls() {
   const rail = document.getElementById("app-rail");
   if (!rail) return;
@@ -2366,7 +2714,53 @@ function initMarineMapOnce() {
       paint: { "line-color": "#1175aa", "line-width": 2 },
     });
 
+    mmMap.addSource("anchor-watch", {
+      type: "geojson",
+      data: { type: "FeatureCollection", features: [] },
+    });
+    mmMap.addLayer({
+      id: "anchor-radius-fill", type: "fill", source: "anchor-watch",
+      filter: ["==", ["get", "kind"], "radius"],
+      paint: {
+        "fill-color": ["case", ["==", ["get", "alarm"], 1], "#dc2626", "#0ea5e9"],
+        "fill-opacity": 0.08,
+      },
+    });
+    mmMap.addLayer({
+      id: "anchor-radius-outline", type: "line", source: "anchor-watch",
+      filter: ["==", ["get", "kind"], "radius"],
+      paint: {
+        "line-color": ["case", ["==", ["get", "alarm"], 1], "#ef4444", "#0ea5e9"],
+        "line-width": 2.5,
+        "line-dasharray": [2, 1.4],
+      },
+    });
+    mmMap.addLayer({
+      id: "anchor-swing-line", type: "line", source: "anchor-watch",
+      filter: ["==", ["get", "kind"], "swing"],
+      paint: { "line-color": "#13b8d2", "line-width": 2.2, "line-opacity": 0.72 },
+    });
+    mmMap.addLayer({
+      id: "anchor-swing-points", type: "circle", source: "anchor-watch",
+      filter: ["==", ["get", "kind"], "swingPoints"],
+      paint: {
+        "circle-radius": 2.5, "circle-color": "#67e8f9", "circle-opacity": 0.72,
+        "circle-stroke-color": "#083344", "circle-stroke-width": 0.7,
+      },
+    });
+    mmMap.addLayer({
+      id: "anchor-distance-line", type: "line", source: "anchor-watch",
+      filter: ["==", ["get", "kind"], "distance"],
+      paint: {
+        "line-color": ["case", ["==", ["get", "alarm"], 1], "#ef4444", "#f8fafc"],
+        "line-width": 2, "line-opacity": 0.8, "line-dasharray": [1.5, 1.4],
+      },
+    });
+
     updateTrailSource();
+    recomputeAnchorDistances();
+    updateAnchorWatchMap();
+    updateAnchorWatchUi();
     raiseOperationalLayers();
     applyTrailVisibility();
     // updateAccuracyRing();
@@ -2405,10 +2799,17 @@ function initMarineMapOnce() {
   });
 
   buildControls();
+  if (anchorWatch.active && !anchorAutoResumeAttempted) {
+    anchorAutoResumeAttempted = true;
+    setTimeout(() => {
+      if (anchorWatch.active && document.visibilityState === "visible") startGpsForMap();
+    }, 350);
+  }
 }
 
 function startGpsForMap() {
   if (!("geolocation" in navigator)) {
+    if (pendingAnchorSet) { pendingAnchorSet = false; updateAnchorWatchUi(); }
     setGpsStatus("Geolocation not supported by this browser.");
     return;
   }
@@ -2423,10 +2824,13 @@ function startGpsForMap() {
   if (!mapGpsBound) {
     mapUnsub = GEO.on((type, payload) => {
       if (type === "position") onPos(payload);
-      else if (type === "error")
+      else if (type === "error") {
+        if (pendingAnchorSet) { pendingAnchorSet = false; updateAnchorWatchUi(); }
         setGpsStatus(`GPS error: ${payload.message || payload.code}`);
-      else if (type === "perm" && payload === "denied")
+      } else if (type === "perm" && payload === "denied") {
+        if (pendingAnchorSet) { pendingAnchorSet = false; updateAnchorWatchUi(); }
         setGpsStatus("Location blocked in site settings.");
+      }
       else if (type === "retry" && payload === "low-accuracy")
         setGpsStatus(
           "High-accuracy failed; retrying with network-based location…"
@@ -2509,6 +2913,11 @@ function onPos(p) {
   // ---------- POSITION: use the accepted raw fix to avoid lag near hazards ----------
   plotLat = latitude;
   plotLon = longitude;
+
+  if (pendingAnchorSet) {
+    startAnchorWatchAt(latitude, longitude, now, acc);
+  }
+  updateAnchorWatchWithFix(latitude, longitude, now, acc, recent);
 
   if (mmMap && !mmBoat) {
     mmBoatEl = document.createElement("div");
@@ -2638,9 +3047,13 @@ document.addEventListener("visibilitychange", () => {
     setGpsStatus("Resumed — refreshing GPS & sensors…");
   } else {
     flushTrailSave();
+    flushAnchorWatchSave();
   }
 });
-window.addEventListener("pagehide", flushTrailSave);
+window.addEventListener("pagehide", () => {
+  flushTrailSave();
+  flushAnchorWatchSave();
+});
 
 // Stale-fix watchdog: if stream stalls, pull a fresh fix (safe even if map not started)
 setInterval(() => {
@@ -2663,6 +3076,39 @@ function wireControls() {
   $("#mm-startgps")?.addEventListener("click", startGpsForMap);
   $("#mm-recenter")?.addEventListener("click", recenterToBoat);
   $("#mm-mobile-recenter")?.addEventListener("click", recenterOrStartGps);
+
+  $("#mm-anchor-set")?.addEventListener("click", setAnchorAtBoat);
+  $("#mm-anchor-clear")?.addEventListener("click", clearAnchorWatch);
+  $("#mm-anchor-clear-swing")?.addEventListener("click", clearAnchorSwingHistory);
+  const anchorRadiusInput = $("#mm-anchor-radius");
+  if (anchorRadiusInput) {
+    anchorRadiusInput.value = String(Math.round(anchorWatch.radiusM));
+    anchorRadiusInput.addEventListener("change", (e) => {
+      const v = Number(e.target.value);
+      if (!Number.isFinite(v)) return;
+      anchorWatch.radiusM = Math.min(250, Math.max(5, v));
+      e.target.value = String(Math.round(anchorWatch.radiusM));
+      recomputeAnchorDistances();
+      const shouldAlarm = anchorWatch.active && anchorCurrentDistanceM != null &&
+        Number.isFinite(anchorFixAccuracyM) && anchorFixAccuracyM <= ANCHOR_MAX_ACC_M &&
+        anchorCurrentDistanceM > anchorWatch.radiusM;
+      setAnchorAlarm(shouldAlarm);
+      saveAnchorWatchNow();
+      updateAnchorWatchMap();
+      updateAnchorWatchUi();
+    });
+  }
+  const anchorSwingToggle = $("#mm-anchor-swing-visible");
+  if (anchorSwingToggle) {
+    anchorSwingToggle.checked = anchorWatch.swingVisible;
+    anchorSwingToggle.addEventListener("change", (e) => {
+      anchorWatch.swingVisible = !!e.target.checked;
+      saveAnchorWatchNow();
+      updateAnchorWatchMap();
+    });
+  }
+  recomputeAnchorDistances();
+  updateAnchorWatchUi();
 
   setupFloatingCompass();
 
