@@ -115,6 +115,10 @@ if ("serviceWorker" in navigator) {
 /* =========================================================
    Tabs & collapsibles (robust + simple)
    ========================================================= */
+function syncMobilePanelState() {
+  document.body.classList.toggle("mobile-panel-open", !!document.querySelector(".map-flyout.open"));
+}
+
 function closeMapFlyouts(except = null) {
   $all(".map-flyout.open").forEach((panel) => {
     if (except && panel.dataset.flyout === except) return;
@@ -125,6 +129,7 @@ function closeMapFlyouts(except = null) {
     btn.classList.toggle("active", !!keep);
     btn.setAttribute("aria-expanded", keep ? "true" : "false");
   });
+  syncMobilePanelState();
 }
 
 function showTab(tabId, btnEl) {
@@ -176,7 +181,15 @@ function setupMapRail() {
         btn.classList.add("active");
         btn.setAttribute("aria-expanded", "true");
       }
+      syncMobilePanelState();
     });
+  });
+
+  $("#mm-mobile-speed-pill")?.addEventListener("click", () => {
+    if (!$("#map")?.classList.contains("active")) showTab("map", null);
+    const boatBtn = $("#app-rail > .rail-btn[data-map-panel=\"boat\"]");
+    const boatPanel = document.querySelector('.map-flyout[data-flyout="boat"]');
+    if (!boatPanel?.classList.contains("open")) boatBtn?.click();
   });
 
   // Compass is a direct control, not a flyout. If used from another page,
@@ -184,6 +197,18 @@ function setupMapRail() {
   $("#mm-show-compass")?.addEventListener("click", () => {
     if (!$("#map")?.classList.contains("active")) showTab("map", null);
   });
+
+  // Phones start with just the bottom dock visible so the map gets maximum room.
+  // Desktop/tablet keeps the existing left-rail behaviour.
+  const mobileDockQuery = window.matchMedia(
+    "(max-width: 760px), (max-width: 900px) and (pointer: coarse)"
+  );
+  const applyMobileDockState = () => {
+    if (mobileDockQuery.matches) closeMapFlyouts();
+  };
+  applyMobileDockState();
+  if (mobileDockQuery.addEventListener) mobileDockQuery.addEventListener("change", applyMobileDockState);
+  else mobileDockQuery.addListener?.(applyMobileDockState);
 }
 
 function bindTabsAndCollapsibles() {
@@ -1156,8 +1181,11 @@ function updateStats({ kts }) {
   if (el) {
     el.textContent = `${trail.length.toLocaleString()} points • ${fmt(mToNm(totalDistM), 2)} NM recorded`;
   }
+  const speedText = fmt(kts, 1);
   const h = document.getElementById("mm-speed");
-  if (h) h.textContent = fmt(kts, 1);
+  if (h) h.textContent = speedText;
+  const mobile = document.getElementById("mm-mobile-speed");
+  if (mobile) mobile.textContent = speedText;
   updateTrackUi();
 }
 
@@ -2037,7 +2065,28 @@ function updateMeasureUi() {
       legsEl.appendChild(div);
     }
   }
+  updateMobileHydroAlert();
   if (mmMap?.getCanvas?.()) mmMap.getCanvas().style.cursor = measureActive ? "crosshair" : "";
+}
+
+function updateMobileHydroAlert() {
+  const el = document.getElementById("mm-mobile-hydro-alert");
+  if (!el) return;
+  const rank = { land: 5, shallow: 5, multi: 5, hazard: 4, "shallow-near": 3, unavailable: 1, ok: 0 };
+  let worst = null;
+  for (const a of routeHydroAssessments || []) {
+    if (!a || a.kind === "ok" || a.kind === "unavailable") continue;
+    if (!worst || (rank[a.kind] || 0) > (rank[worst.kind] || 0)) worst = a;
+  }
+  if (!worst) {
+    el.textContent = "";
+    el.classList.remove("has-warning");
+    return;
+  }
+  el.textContent = worst.label;
+  el.style.background = worst.kind === "shallow-near"
+    ? "rgba(181,106,20,.94)" : "rgba(145,37,37,.94)";
+  el.classList.add("has-warning");
 }
 
 function clearRouteWaypointMarkers() {
@@ -2343,6 +2392,7 @@ function startGpsForMap() {
     return;
   }
   if (!mmMap) initMarineMapOnce();
+  document.body.classList.add("gps-active");
   setGpsStatus("Starting live GPS…");
 
   // Enable device compass (iOS permission happens here via user gesture)
@@ -2583,6 +2633,7 @@ setInterval(() => {
    ========================================================= */
 function wireControls() {
   setupMapRail();
+  syncMobilePanelState();
   $("#mm-startgps")?.addEventListener("click", startGpsForMap);
   $("#mm-recenter")?.addEventListener("click", recenterToBoat);
 

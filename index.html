@@ -841,15 +841,119 @@
     .maplibregl-ctrl-top-right { top: 4px; right: 4px; }
     .maplibregl-ctrl-bottom-left { left: var(--rail-w); }
     .maplibregl-ctrl-bottom-right { right: 4px; }
-    @media (max-width: 640px) {
-      :root { --rail-w: 48px; }
-      .app-rail { padding-inline: 4px; }
-      .app-rail .rail-btn { width: 38px; height: 41px; flex-basis: 41px; }
-      .rail-label { display: none; }
-      .map-flyout { left: calc(var(--rail-w) + 6px); width: min(270px, calc(100vw - var(--rail-w) - 16px)); }
-      .tab-content:not(#map) { margin-left: calc(var(--rail-w) + 8px); margin-right: 8px; }
-      .map-brand-chip { left: calc(var(--rail-w) + 8px); }
+    /* Mobile: preserve map width with a bottom dock + bottom sheets. */
+    :root { --mobile-dock-h: 60px; }
+    .mobile-speed-pill, .mobile-hydro-alert, .mobile-settings-entry { display: none; }
+
+    @media (max-width: 760px), (max-width: 900px) and (pointer: coarse) {
+      :root { --rail-w: 0px; --mobile-dock-h: 60px; }
+
+      .app-rail {
+        left: 0; right: 0; top: auto; bottom: 0;
+        width: 100%; height: var(--mobile-dock-h);
+        padding: 4px max(4px, env(safe-area-inset-right)) max(4px, env(safe-area-inset-bottom)) max(4px, env(safe-area-inset-left));
+        flex-direction: row; align-items: stretch; justify-content: space-around; gap: 2px;
+        border-right: 0; border-top: 1px solid rgba(255,255,255,.11);
+        box-shadow: 0 -8px 26px rgba(2,16,28,.22);
+        overflow: visible;
+      }
+      .rail-spacer { display: none; }
+      .app-rail > .rail-btn {
+        width: auto; height: auto; min-height: 48px; flex: 1 1 25%;
+        max-width: 120px; border-radius: 10px; gap: 3px;
+      }
+      .app-rail > .rail-btn .rail-icon { font-size: 19px; }
+      .app-rail > .rail-btn .rail-label { display: block; font-size: 9px; }
+
+      /* Compass remains an independent one-tap control, not a dock item. */
+      #mm-show-compass {
+        position: fixed; z-index: 5250; right: 10px; left: auto;
+        bottom: calc(var(--mobile-dock-h) + 10px);
+        width: 44px !important; height: 44px !important; min-height: 44px !important;
+        flex: none !important; border-radius: 50% !important;
+        background: rgba(7,24,41,.91);
+        border: 1px solid rgba(255,255,255,.16);
+        box-shadow: 0 7px 20px rgba(0,0,0,.24);
+        backdrop-filter: blur(9px); -webkit-backdrop-filter: blur(9px);
+      }
+      #mm-show-compass .rail-label { display: none !important; }
+      #mm-show-compass .rail-icon { font-size: 21px; }
+
+      /* Settings is reached through More on phones. */
+      .app-rail > .rail-btn[data-map-panel="settings"] { display: none; }
+      .mobile-settings-entry { display: flex; }
+
+      .map-flyout {
+        left: 8px; right: 8px; top: auto;
+        bottom: calc(var(--mobile-dock-h) + 8px);
+        width: auto; max-height: min(58dvh, 480px);
+        border-radius: 16px 16px 12px 12px;
+        padding: 15px 11px 12px;
+        box-shadow: 0 -12px 34px rgba(0,0,0,.30);
+        transform-origin: bottom center;
+      }
+      body.gps-active .map-flyout { bottom: calc(var(--mobile-dock-h) + 58px); }
+      .map-flyout.open { animation: mobileSheetIn .16s ease-out; }
+      .map-flyout::before {
+        content: ""; position: absolute; top: 6px; left: 50%; transform: translateX(-50%);
+        width: 38px; height: 4px; border-radius: 999px; background: rgba(255,255,255,.22);
+      }
+      @keyframes mobileSheetIn {
+        from { opacity: 0; transform: translateY(12px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      .flyout-heading { padding-top: 3px; }
+      .settings-grid { grid-template-columns: 1fr 1fr; }
+
+      .mobile-speed-pill {
+        position: fixed; z-index: 5260; left: 50%; transform: translateX(-50%);
+        bottom: calc(var(--mobile-dock-h) + 9px);
+        min-width: 76px; height: 42px; padding: 3px 12px;
+        border: 1px solid rgba(255,255,255,.16); border-radius: 13px;
+        align-items: baseline; justify-content: center; gap: 4px;
+        color: #fff; background: rgba(7,24,41,.91);
+        box-shadow: 0 7px 20px rgba(0,0,0,.24);
+        backdrop-filter: blur(9px); -webkit-backdrop-filter: blur(9px);
+        font: inherit; cursor: pointer;
+      }
+      .mobile-speed-pill .mobile-speed-value {
+        font-size: 1.33rem; font-weight: 850; line-height: 1; font-variant-numeric: tabular-nums;
+      }
+      .mobile-speed-pill small { font-size: .62rem; font-weight: 800; color: rgba(255,255,255,.60); text-transform: uppercase; }
+      body[data-active-tab="map"].gps-active .mobile-speed-pill { display: flex; }
+
+      .mobile-hydro-alert {
+        position: fixed; z-index: 5240; left: 8px; max-width: calc(100vw - 116px);
+        bottom: calc(var(--mobile-dock-h) + 10px);
+        padding: 7px 9px; border-radius: 10px;
+        color: #fff; background: rgba(181,69,20,.92);
+        border: 1px solid rgba(255,255,255,.14);
+        box-shadow: 0 6px 18px rgba(0,0,0,.20);
+        font-size: .70rem; font-weight: 760; line-height: 1.25;
+        pointer-events: none;
+      }
+      body.gps-active .mobile-hydro-alert { bottom: calc(var(--mobile-dock-h) + 59px); }
+      body[data-active-tab="map"] .mobile-hydro-alert.has-warning { display: block; }
+      body.mobile-panel-open .mobile-hydro-alert { display: none !important; }
+
+      .tab-content:not(#map) {
+        margin: 8px 8px calc(var(--mobile-dock-h) + 8px);
+        padding: .8rem; border-radius: 14px;
+      }
+      .map-brand-chip { left: 8px; top: 8px; }
+      .floating-compass { left: 10px; top: 48px; }
+      .maplibregl-ctrl-bottom-left { left: 0; bottom: var(--mobile-dock-h); }
+      .maplibregl-ctrl-bottom-right { bottom: var(--mobile-dock-h); }
+      #mm-nav-alert {
+        left: 8px !important; bottom: calc(var(--mobile-dock-h) + 58px) !important;
+        max-width: min(52vw, 300px) !important; font-size: 11px !important;
+      }
+    }
+
+    @media (max-width: 420px) {
       .settings-grid { grid-template-columns: 1fr; }
+      .app-rail > .rail-btn .rail-label { font-size: 8px; }
+      .map-flyout { left: 6px; right: 6px; }
     }
 
   </style>
@@ -987,6 +1091,7 @@
         <button type="button" class="menu-tab" data-tab="radar" aria-controls="radar">Radar <span>›</span></button>
         <button type="button" class="menu-tab" data-tab="info" aria-controls="info">Reference <span>›</span></button>
         <button type="button" class="menu-tab" data-tab="emergency" aria-controls="emergency">Safety <span>›</span></button>
+        <button type="button" class="menu-tab mobile-settings-entry" data-map-panel="settings" aria-controls="rail-panel-settings" aria-expanded="false">Settings <span>›</span></button>
       </div>
     </section>
 
@@ -1009,6 +1114,11 @@
       </div>
     </section>
   </nav>
+
+  <button id="mm-mobile-speed-pill" class="mobile-speed-pill" type="button" aria-label="Open Boat and GPS controls">
+    <span id="mm-mobile-speed" class="mobile-speed-value">—</span><small>kn</small>
+  </button>
+  <div id="mm-mobile-hydro-alert" class="mobile-hydro-alert" role="status" aria-live="polite"></div>
 
   <!-- Forecast Tab -->
   <section id="forecast" class="tab-content" role="region" aria-labelledby="forecast-tab" data-forecast-build="20260924-1">
