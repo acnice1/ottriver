@@ -87,6 +87,7 @@ const LS_HYDRO_VISIBLE = "sailHydroVisible_v1";
 const LS_SHALLOW_BUFFER = "sailShallowBufferM_v1";
 const LS_HAZARD_BUFFER = "sailHazardBufferM_v1";
 const LS_ANCHOR_WATCH = "sailAnchorWatch_v1";
+const LS_SCREEN_AWAKE = "sailScreenAwake_v1";
 
 /* ===== EMA helpers (explicit position & speed EMAs) ===== */
 const makeEma = (alpha) => (current, prev) =>
@@ -552,6 +553,14 @@ let anchorWatchDirty = false;
 let anchorWatchSaveTimer = null;
 let pendingAnchorSet = false;
 let anchorAutoResumeAttempted = false;
+
+// Screen Wake Lock is an explicit user preference, independent of GPS/Anchor Watch.
+let keepScreenAwake = (() => {
+  try { return localStorage.getItem(LS_SCREEN_AWAKE) === "true"; } catch (_) { return false; }
+})();
+let screenWakeLock = null;
+let wakeLockRequestInFlight = false;
+let wakeToastTimer = null;
 
 // MapLibre DOM markers we add (keeps API simple)
 let markersLayer = [];
@@ -1373,6 +1382,101 @@ function addDomMarker(lat, lng, type, ts) {
 function setGpsStatus(msg) {
   const el = document.getElementById("mm-gps-status");
   if (el) el.textContent = msg || "";
+}
+
+function showMobileControlToast(msg, ms = 2200) {
+  const el = $("#mm-mobile-control-toast");
+  if (!el) return;
+  if (wakeToastTimer != null) clearTimeout(wakeToastTimer);
+  el.textContent = msg || "";
+  el.classList.toggle("show", !!msg);
+  if (msg) {
+    wakeToastTimer = setTimeout(() => {
+      el.classList.remove("show");
+      wakeToastTimer = null;
+    }, ms);
+  }
+}
+
+function wakeLockSupported() {
+  return !!(window.isSecureContext && navigator.wakeLock &&
+    typeof navigator.wakeLock.request === "function");
+}
+
+function syncScreenWakeUi() {
+  const btn = $("#mm-mobile-wake");
+  if (!btn) return;
+  const active = !!screenWakeLock && !screenWakeLock.released;
+  btn.classList.toggle("awake-on", active);
+  btn.classList.toggle("awake-requested", keepScreenAwake && !active);
+  btn.setAttribute("aria-pressed", keepScreenAwake ? "true" : "false");
+  if (active) {
+    btn.setAttribute("aria-label", "Allow screen to sleep");
+    btn.title = "Screen awake — tap to allow sleep";
+  } else if (keepScreenAwake) {
+    btn.setAttribute("aria-label", "Keep screen awake requested; tap to turn off");
+    btn.title = "Screen awake requested — reconnecting";
+  } else {
+    btn.setAttribute("aria-label", "Keep screen awake");
+    btn.title = "Keep screen awake";
+  }
+}
+
+async function acquireScreenWakeLock({ notify = false } = {}) {
+  if (!keepScreenAwake) { syncScreenWakeUi(); return false; }
+  if (screenWakeLock && !screenWakeLock.released) { syncScreenWakeUi(); return true; }
+  if (wakeLockRequestInFlight || document.visibilityState !== "visible") {
+    syncScreenWakeUi();
+    return false;
+  }
+  if (!wakeLockSupported()) {
+    keepScreenAwake = false;
+    try { localStorage.setItem(LS_SCREEN_AWAKE, "false"); } catch (_) {}
+    syncScreenWakeUi();
+    if (notify) showMobileControlToast(window.isSecureContext
+      ? "Screen-awake control is not supported by this browser."
+      : "Screen awake requires the app to run from a secure HTTPS/PWA context.", 3200);
+    return false;
+  }
+
+  wakeLockRequestInFlight = true;
+  try {
+    const sentinel = await navigator.wakeLock.request("screen");
+    screenWakeLock = sentinel;
+    sentinel.addEventListener("release", () => {
+      if (screenWakeLock === sentinel) screenWakeLock = null;
+      syncScreenWakeUi();
+    });
+    syncScreenWakeUi();
+    if (notify) showMobileControlToast("Screen will stay awake.");
+    return true;
+  } catch (err) {
+    screenWakeLock = null;
+    syncScreenWakeUi();
+    if (notify) showMobileControlToast(`Could not keep screen awake${err?.name ? ` (${err.name})` : ""}.`, 3200);
+    return false;
+  } finally {
+    wakeLockRequestInFlight = false;
+  }
+}
+
+async function setScreenAwake(on) {
+  keepScreenAwake = !!on;
+  try { localStorage.setItem(LS_SCREEN_AWAKE, String(keepScreenAwake)); } catch (_) {}
+
+  if (!keepScreenAwake) {
+    const lock = screenWakeLock;
+    screenWakeLock = null;
+    syncScreenWakeUi();
+    if (lock && !lock.released) {
+      try { await lock.release(); } catch (_) {}
+    }
+    showMobileControlToast("Screen sleep enabled.");
+    return;
+  }
+
+  syncScreenWakeUi();
+  await acquireScreenWakeLock({ notify: true });
 }
 
 function ensureNavAlert() {
@@ -3042,6 +3146,7 @@ document.addEventListener("visibilitychange", () => {
     forceFreshFix();
     GEO.start(true);
     if (mmMap) mmMap.resize();
+    if (keepScreenAwake) void acquireScreenWakeLock({ notify: false });
     // Reset heading smoothing so the first rotation is crisp
     emaHead = null;
     setGpsStatus("Resumed — refreshing GPS & sensors…");
@@ -3076,6 +3181,13 @@ function wireControls() {
   $("#mm-startgps")?.addEventListener("click", startGpsForMap);
   $("#mm-recenter")?.addEventListener("click", recenterToBoat);
   $("#mm-mobile-recenter")?.addEventListener("click", recenterOrStartGps);
+  $("#mm-mobile-wake")?.addEventListener("click", () => {
+    void setScreenAwake(!keepScreenAwake);
+  });
+  syncScreenWakeUi();
+  if (keepScreenAwake && document.visibilityState === "visible") {
+    void acquireScreenWakeLock({ notify: false });
+  }
 
   $("#mm-anchor-set")?.addEventListener("click", setAnchorAtBoat);
   $("#mm-anchor-clear")?.addEventListener("click", clearAnchorWatch);
