@@ -118,7 +118,7 @@ window.addEventListener("orientationchange", adjustPanelOffset);
    ========================================================= */
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker
-    .register("service-worker.js")
+    .register("service-worker.js", { updateViaCache: "none" })
     .then((reg) => console.log("Service worker registered:", reg.scope))
     .catch((err) => console.error("Service worker error:", err));
 }
