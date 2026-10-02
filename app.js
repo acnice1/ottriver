@@ -76,6 +76,7 @@ const LS_POINTS = "sailTrailPoints_v1";
 const LS_DIST = "sailTrailDistM_v1";
 const LS_MARKERS = "sailMarkers_v1";
 const LS_CHART_OPACITY = "sailChartOpacity_v1";
+const LS_CHART_MODE = "sailChartMode_v1";
 const LS_COMPASS_POS = "sailCompassPosition_v1";
 const LS_COMPASS_VISIBLE = "sailCompassVisible_v1";
 const LS_WIND_BEARING = "sailWindBearing_v1";
@@ -475,6 +476,10 @@ let chartsLoaded = false;
 let chartOpacity = (() => {
   const saved = parseFloat(localStorage.getItem(LS_CHART_OPACITY) || "");
   return Number.isFinite(saved) ? Math.min(1, Math.max(0, saved)) : 0.98;
+})();
+let chartMode = (() => {
+  const saved = localStorage.getItem(LS_CHART_MODE);
+  return ["off", "water", "full"].includes(saved) ? saved : "full";
 })();
 let plotLat = null,
   plotLon = null,
@@ -997,6 +1002,165 @@ function forceFreshFix() {
   } catch { freshFixInFlight = false; }
 }
 
+/* =========================================================
+   Water-only hydrographic chart tiles
+   Uses white + light-blue + dark-blue hydro polygons as a mask.
+   Tiles with no modeled water return a transparent image without fetching the
+   underlying chart tile. Shoreline tiles are fetched once, then clipped in a
+   canvas before MapLibre receives them.
+   ========================================================= */
+let waterMaskIndexes = null;
+let transparentTileBufferPromise = null;
+
+function waterTileLon(x, z) {
+  return (x / Math.pow(2, z)) * 360 - 180;
+}
+function waterTileLat(y, z) {
+  const n = Math.PI - (2 * Math.PI * y) / Math.pow(2, z);
+  return (180 / Math.PI) * Math.atan(Math.sinh(n));
+}
+function waterLngToTilePx(lng, z, tileX) {
+  const n = Math.pow(2, z);
+  return (((lng + 180) / 360) * n - tileX) * 256;
+}
+function waterLatToTilePx(lat, z, tileY) {
+  const safeLat = Math.max(-85.05112878, Math.min(85.05112878, lat));
+  const sin = Math.sin((safeLat * Math.PI) / 180);
+  const worldY = (0.5 - Math.log((1 + sin) / (1 - sin)) / (4 * Math.PI)) * Math.pow(2, z);
+  return (worldY - tileY) * 256;
+}
+
+function ensureWaterMaskIndexes() {
+  if (waterMaskIndexes) return waterMaskIndexes;
+  const model = window.HYDRO_1550A || {};
+  waterMaskIndexes = ["white", "light", "dark"]
+    .filter((key) => model[key])
+    .map((key) => ({ key, index: hydroBuildLayerIndex(model[key]) }));
+  return waterMaskIndexes;
+}
+
+function waterPartsForTile(z, x, y) {
+  const west = waterTileLon(x, z);
+  const east = waterTileLon(x + 1, z);
+  const north = waterTileLat(y, z);
+  const south = waterTileLat(y + 1, z);
+  const out = [];
+
+  for (const layer of ensureWaterMaskIndexes()) {
+    const idx = layer.index;
+    const x0 = Math.floor(west / HYDRO_GRID_DEG), x1 = Math.floor(east / HYDRO_GRID_DEG);
+    const y0 = Math.floor(south / HYDRO_GRID_DEG), y1 = Math.floor(north / HYDRO_GRID_DEG);
+    const seen = new Set();
+    for (let gx = x0; gx <= x1; gx++) {
+      for (let gy = y0; gy <= y1; gy++) {
+        const bucket = idx.grid.get(`${gx},${gy}`);
+        if (!bucket) continue;
+        for (const partIdx of bucket) seen.add(partIdx);
+      }
+    }
+    for (const partIdx of seen) {
+      const part = idx.parts[partIdx];
+      const [minX, minY, maxX, maxY] = part.bbox;
+      if (maxX < west || minX > east || maxY < south || minY > north) continue;
+      out.push(part);
+    }
+  }
+  return out;
+}
+
+function paintWaterMask(maskCtx, parts, z, x, y) {
+  maskCtx.clearRect(0, 0, 256, 256);
+  maskCtx.fillStyle = "#fff";
+  for (const part of parts) {
+    const path = new Path2D();
+    for (const ring of part.rings || []) {
+      if (!ring?.length) continue;
+      const first = ring[0];
+      path.moveTo(waterLngToTilePx(first[0], z, x), waterLatToTilePx(first[1], z, y));
+      for (let i = 1; i < ring.length; i++) {
+        path.lineTo(waterLngToTilePx(ring[i][0], z, x), waterLatToTilePx(ring[i][1], z, y));
+      }
+      path.closePath();
+    }
+    // evenodd preserves holes within each polygon; separate fills union overlaps.
+    maskCtx.fill(path, "evenodd");
+  }
+}
+
+function canvasToPngArrayBuffer(canvas) {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(async (blob) => {
+      if (!blob) return reject(new Error("Could not encode clipped chart tile"));
+      resolve(await blob.arrayBuffer());
+    }, "image/png");
+  });
+}
+
+function transparentWaterTileBuffer() {
+  if (!transparentTileBufferPromise) {
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = 1;
+    transparentTileBufferPromise = canvasToPngArrayBuffer(canvas);
+  }
+  return transparentTileBufferPromise;
+}
+
+async function decodeChartTile(blob) {
+  if (typeof createImageBitmap === "function") return createImageBitmap(blob);
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("Could not decode chart tile")); };
+    img.src = url;
+  });
+}
+
+async function waterChartProtocol(params, abortController) {
+  const match = String(params?.url || "").match(/^waterchart:\/\/tile\/([^/]+)\/(\d+)\/(\d+)\/(\d+)\.([a-z0-9]+)$/i);
+  if (!match) return { data: await transparentWaterTileBuffer() };
+  const [, folder, zText, xText, yText, ext] = match;
+  const z = Number(zText), x = Number(xText), y = Number(yText);
+  const parts = waterPartsForTile(z, x, y);
+
+  // Important: do not fetch chart imagery for tiles that contain no modeled water.
+  if (!parts.length) return { data: await transparentWaterTileBuffer() };
+
+  // Build the mask before fetching. A bbox can touch a polygon without any
+  // visible pixels, so this lets us avoid those false-positive network reads too.
+  const mask = document.createElement("canvas");
+  mask.width = mask.height = 256;
+  const maskCtx = mask.getContext("2d", { willReadFrequently: true });
+  paintWaterMask(maskCtx, parts, z, x, y);
+  const alpha = maskCtx.getImageData(0, 0, 256, 256).data;
+  let hasWaterPixels = false;
+  for (let i = 3; i < alpha.length; i += 4) {
+    if (alpha[i]) { hasWaterPixels = true; break; }
+  }
+  if (!hasWaterPixels) return { data: await transparentWaterTileBuffer() };
+
+  const tileUrl = new URL(`${folder}/${z}/${x}/${y}.${ext}`, document.baseURI).href;
+  const response = await fetch(tileUrl, { signal: abortController?.signal });
+  if (!response.ok) return { data: await transparentWaterTileBuffer() };
+  const blob = await response.blob();
+  const image = await decodeChartTile(blob);
+
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = 256;
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(image, 0, 0, 256, 256);
+  if (typeof image.close === "function") image.close();
+  ctx.globalCompositeOperation = "destination-in";
+  ctx.drawImage(mask, 0, 0);
+  ctx.globalCompositeOperation = "source-over";
+
+  return { data: await canvasToPngArrayBuffer(canvas) };
+}
+
+if (window.maplibregl?.addProtocol) {
+  try { window.maplibregl.addProtocol("waterchart", waterChartProtocol); } catch (_) {}
+}
+
 // Web Mercator unproject (EPSG:3857) to lat/lon (for tilemapresource.xml bounds)
 function wmUnproject(x, y) {
   const R = 6378137;
@@ -1046,32 +1210,80 @@ async function ensureAllChartBounds() {
 }
 function addAllCharts() {
   CHARTS.forEach((def) => {
-    const srcId = `chart-${def.name}`;
-    const lyrId = `chart-${def.name}-lyr`;
-    const url = `${def.folder}/{z}/{x}/{y}.${def.ext || "png"}`;
-    if (!mmMap.getSource(srcId)) {
-      const source = {
-        type: "raster",
-        tiles: [url],
-        tileSize: 256,
-        minzoom: def.minZ ?? def.minZoom ?? 10,
-        maxzoom: def.maxZ ?? def.maxZoom ?? 16,
-      };
+    const fullSrcId = `chart-${def.name}`;
+    const fullLyrId = `chart-${def.name}-lyr`;
+    const waterSrcId = `chart-${def.name}-water`;
+    const waterLyrId = `chart-${def.name}-water-lyr`;
+    const ext = def.ext || "png";
+    const fullUrl = `${def.folder}/{z}/{x}/{y}.${ext}`;
+    const waterUrl = `waterchart://tile/${def.folder}/{z}/{x}/{y}.${ext}`;
+
+    const sourceBase = {
+      type: "raster",
+      tileSize: 256,
+      minzoom: def.minZ ?? def.minZoom ?? 10,
+      maxzoom: def.maxZ ?? def.maxZoom ?? 16,
+    };
+
+    if (!mmMap.getSource(fullSrcId)) {
+      const source = { ...sourceBase, tiles: [fullUrl] };
       if (def.bounds) source.bounds = def.bounds;
-      mmMap.addSource(srcId, source);
+      mmMap.addSource(fullSrcId, source);
       mmMap.addLayer({
-        id: lyrId,
+        id: fullLyrId,
         type: "raster",
-        source: srcId,
+        source: fullSrcId,
+        layout: { visibility: "none" },
+        paint: { "raster-opacity": chartOpacity },
+      }, mmMap.getLayer("nav-accuracy-fill") ? "nav-accuracy-fill" : undefined);
+    }
+
+    if (!mmMap.getSource(waterSrcId)) {
+      const source = { ...sourceBase, tiles: [waterUrl] };
+      if (def.bounds) source.bounds = def.bounds;
+      mmMap.addSource(waterSrcId, source);
+      mmMap.addLayer({
+        id: waterLyrId,
+        type: "raster",
+        source: waterSrcId,
+        layout: { visibility: "none" },
         paint: { "raster-opacity": chartOpacity },
       }, mmMap.getLayer("nav-accuracy-fill") ? "nav-accuracy-fill" : undefined);
     }
   });
+  applyChartMode(false);
   if (mmMap.getLayer("trail-line") && mmMap.getLayer("nav-accuracy-fill"))
     mmMap.moveLayer("trail-line", "nav-accuracy-fill");
   // Keep operational graphics above the marine raster tiles.
   raiseOperationalLayers();
-  chartQualityText = "Marine chart alignment has not been independently verified";
+  refreshNavStatus();
+}
+
+function applyChartMode(persist = true) {
+  if (!["off", "water", "full"].includes(chartMode)) chartMode = "full";
+  if (mmMap) {
+    CHARTS.forEach((def) => {
+      const fullId = `chart-${def.name}-lyr`;
+      const waterId = `chart-${def.name}-water-lyr`;
+      if (mmMap.getLayer(fullId)) {
+        mmMap.setLayoutProperty(fullId, "visibility", chartMode === "full" ? "visible" : "none");
+      }
+      if (mmMap.getLayer(waterId)) {
+        mmMap.setLayoutProperty(waterId, "visibility", chartMode === "water" ? "visible" : "none");
+      }
+    });
+  }
+  document.querySelectorAll('input[name="mm-chart-mode"]').forEach((el) => {
+    el.checked = el.value === chartMode;
+  });
+  chartQualityText = chartMode === "off"
+    ? "Hydrographic chart off — basemap only"
+    : chartMode === "water"
+      ? "Water-only hydrographic chart — land shown from basemap"
+      : "Marine chart alignment has not been independently verified";
+  if (persist) {
+    try { localStorage.setItem(LS_CHART_MODE, chartMode); } catch (_) {}
+  }
   refreshNavStatus();
 }
 
@@ -1111,9 +1323,10 @@ function setChartOpacity(value, persist = true) {
 
   if (mmMap) {
     CHARTS.forEach((def) => {
-      const lyrId = `chart-${def.name}-lyr`;
-      if (mmMap.getLayer(lyrId)) {
-        mmMap.setPaintProperty(lyrId, "raster-opacity", chartOpacity);
+      for (const lyrId of [`chart-${def.name}-lyr`, `chart-${def.name}-water-lyr`]) {
+        if (mmMap.getLayer(lyrId)) {
+          mmMap.setPaintProperty(lyrId, "raster-opacity", chartOpacity);
+        }
       }
     });
   }
@@ -3251,6 +3464,15 @@ function wireControls() {
   updateAnchorWatchUi();
 
   setupFloatingCompass();
+
+  document.querySelectorAll('input[name="mm-chart-mode"]').forEach((radio) => {
+    radio.checked = radio.value === chartMode;
+    radio.addEventListener("change", (e) => {
+      if (!e.target.checked) return;
+      chartMode = e.target.value;
+      applyChartMode(true);
+    });
+  });
 
   const chartOpacitySlider = $("#mm-chart-opacity");
   if (chartOpacitySlider) {
