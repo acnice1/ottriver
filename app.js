@@ -1901,6 +1901,15 @@ function hydroClassAt(lng, lat) {
   if (!h) return "unavailable";
   if (hydroPointInLayer(h.land, lng, lat)) return "land";
   if (hydroPointInLayer(h.dark, lng, lat)) return "dark";
+
+  // White/light layers are primarily visual, so build their point-query indexes
+  // lazily only if a caller actually asks for a point classification. This keeps
+  // normal routing startup lighter on mobile devices.
+  const model = window.HYDRO_1550A || {};
+  if (!h.light && model.light) h.light = hydroBuildLayerIndex(model.light);
+  if (!h.white && model.white) h.white = hydroBuildLayerIndex(model.white);
+  if (h.light && hydroPointInLayer(h.light, lng, lat)) return "light";
+  if (h.white && hydroPointInLayer(h.white, lng, lat)) return "white";
   return "other";
 }
 
@@ -2077,8 +2086,12 @@ function ensureHydroMapLayers() {
 
   // Visual hydro overlay is water-only. Land geometry is intentionally kept
   // in the hydro model for route validation, but it is not painted on the map.
+  // Draw deeper water first so progressively shallower classes remain visible
+  // on top if simplified source polygons touch or overlap.
   const defs = [
-    ["dark", "#277fb5", 0.42],
+    ["white", "#f7fbff", 0.34],
+    ["light", "#86ccea", 0.40],
+    ["dark", "#277fb5", 0.48],
   ];
 
   // Defensive cleanup for users upgrading from versions that rendered land.
@@ -2106,8 +2119,11 @@ function applyHydroVisibility() {
   if (!mmMap) return;
   if (hydroVisible) ensureHydroMapLayers();
   const visibility = hydroVisible ? "visible" : "none";
-  if (mmMap.getLayer("hydro-dark-fill")) {
-    mmMap.setLayoutProperty("hydro-dark-fill", "visibility", visibility);
+  for (const key of ["white", "light", "dark"]) {
+    const layerId = `hydro-${key}-fill`;
+    if (mmMap.getLayer(layerId)) {
+      mmMap.setLayoutProperty(layerId, "visibility", visibility);
+    }
   }
 
   // Land remains a routing/safety layer only; never render it as an overlay.

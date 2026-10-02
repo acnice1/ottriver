@@ -1,4 +1,4 @@
-const CACHE_NAME = 'ottawa-river-navigator-v5';
+const CACHE_NAME = 'ottawa-river-navigator-v6';
 const CORE_ASSETS = [
   './',
   './index.html',

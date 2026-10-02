@@ -1179,13 +1179,12 @@
         <div class="ctrl-section-title">Hydro intelligence</div>
         <div class="hydro-readout">
           <strong id="mm-hydro-status">1550A model loading…</strong>
-          <div class="tiny-note">Land remains invalid for route safety but is not painted by the hydro overlay. Water-zone/chart colours remain visible.</div>
+          <div class="tiny-note">White, light-blue and dark-blue water classes are shown separately. Land remains invalid for route safety but is not painted by the hydro overlay.</div>
         </div>
-        <div class="hydro-legend" aria-label="Hydro intelligence legend">
-          <span><i class="hydro-swatch" style="background:#ef4444"></i>In shallow / land</span>
-          <span><i class="hydro-swatch" style="background:#f59e0b"></i>Near shallow</span>
-          <span><i class="hydro-swatch" style="background:#ef4444"></i>Hazards</span>
-          <span><i class="hydro-swatch" style="background:#22c55e"></i>Red/green buoys exempt</span>
+        <div class="hydro-legend" aria-label="Hydro water-zone legend">
+          <span><i class="hydro-swatch" style="background:#f7fbff; box-shadow:inset 0 0 0 1px rgba(0,0,0,.28)"></i>White water</span>
+          <span><i class="hydro-swatch" style="background:#86ccea"></i>Light blue</span>
+          <span><i class="hydro-swatch" style="background:#277fb5"></i>Dark blue</span>
         </div>
       </div>
       <div class="ctrl-section">
@@ -1556,7 +1555,7 @@
   </section>
 
   <!-- App JS -->
-  <script src="hydro/hydro_1550A.js?v=20260929-2"></script>
-  <script type="module" src="app.js?v=20261002-water-only-hydro"></script>
+  <script src="hydro/hydro_1550A.js?v=20261002-3water"></script>
+  <script type="module" src="app.js?v=20261002-3water-hydro"></script>
 </body>
 </html>
