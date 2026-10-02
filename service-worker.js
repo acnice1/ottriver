@@ -1,10 +1,10 @@
-const CACHE_NAME = 'ottawa-river-navigator-v7-chart-modes';
+const CACHE_NAME = 'ottawa-river-navigator-v6';
 const CORE_ASSETS = [
   './',
   './index.html',
-  './app.js?v=20261002-chart-modes',
+  './app.js',
   './manifest.json',
-  './hydro/hydro_1550A.js?v=20261002-chart-modes',
+  './hydro/hydro_1550A.js',
   './icons/icon-192.png',
   './icons/icon-512.png',
   './icons/apple-touch-icon.png'
